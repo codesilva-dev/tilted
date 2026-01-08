@@ -1,26 +1,39 @@
-## 2.3. Database — Implementation Instructions
+## 2.3. Database — Implementation Instructions (Supabase)
 
-### 1. Choose a PostgreSQL Provider
-- Recommended options: [Supabase](https://supabase.com/), [Neon](https://neon.tech/), or [PlanetScale](https://planetscale.com/) (PlanetScale is MySQL, so use Supabase or Neon for PostgreSQL).
-- Sign up and create a new project/database.
+### 1. Create a Supabase Project
+- Go to [Supabase](https://supabase.com/) and sign up or log in.
+- Click "New project" and fill in the project name, password, and select a region.
+- Wait for your project to be created.
 
 ### 2. Get Your Database Connection String
-- In your provider’s dashboard, find the connection string (often called `DATABASE_URL`).
-- Copy this string for use in your environment variables.
+- In your Supabase project dashboard, go to "Project Settings" → "Database".
+- Find the "Connection string" (URI) under "Connection info".
+- Copy the `postgresql://...` string.
 
 ### 3. Add the Connection String to Your Project
 - In your project root, open or create a `.env.local` file.
 - Add:
   ```
-  DATABASE_URL=your-connection-string-here
+  DATABASE_URL=your-supabase-connection-string-here
   ```
 - **Never commit your real connection string to version control.**
 
-### 4. Set Up Database Tables
-- Use a migration tool (like [Prisma](https://www.prisma.io/), [Drizzle](https://orm.drizzle.team/), or SQL scripts) to define your tables.
-- Example Prisma schema for your tables:
+### 4. Set Up Database Tables with Prisma
+- If you haven't already, install Prisma:
+  ```
+  npm install prisma --save-dev
+  npx prisma init
+  ```
+- In `prisma/schema.prisma`, replace the datasource block with:
   ```prisma
-  // schema.prisma
+  datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+  }
+  ```
+- Add your models (example below):
+
+  ```prisma
   model User {
     id    String  @id @default(uuid())
     email String  @unique
@@ -29,11 +42,11 @@
   }
 
   model Game {
-    id      String  @id @default(uuid())
+    id        String   @id @default(uuid())
     createdAt DateTime @default(now())
-    users   User[]
-    hands   Hand[]
-    moves   Move[]
+    users     User[]
+    hands     Hand[]
+    moves     Move[]
   }
 
   model Hand {
@@ -52,17 +65,21 @@
     // Add move-specific fields here
   }
   ```
-- Run the migration command for your tool (e.g., `npx prisma migrate dev`).
 
-### 5. Verify the Tables
-- Connect to your database using your provider’s dashboard or a tool like [TablePlus](https://tableplus.com/) or [pgAdmin](https://www.pgadmin.org/).
-- Confirm that the `users`, `games`, `hands`, and `moves` tables exist.
+- Run the migration to create your tables:
+  ```
+  npx prisma migrate dev --name init
+  ```
+
+### 5. Verify the Tables in Supabase
+- In the Supabase dashboard, go to "Table Editor" to see your new tables: `users`, `games`, `hands`, and `moves`.
+- You can also use the SQL editor to run queries and verify your schema.
 
 ---
 
 **References:**
 - [Supabase Quickstart](https://supabase.com/docs/guides/getting-started/quickstarts)
-- [Neon Quickstart](https://neon.tech/docs/introduction/quickstart)
 - [Prisma Getting Started](https://www.prisma.io/docs/getting-started)
+- [Prisma + Supabase Guide](https://supabase.com/docs/guides/integrations/prisma)
 
-Let me know if you want a specific example for Supabase, Neon, or a different ORM!
+Let me know if you want help with SQL-only setup or using Supabase's dashboard to create tables!
