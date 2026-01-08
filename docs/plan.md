@@ -18,8 +18,8 @@
 - [x] Set up ESLint/Prettier
 
 ### 2.2. Authentication
-- [ ] Integrate NextAuth.js (Google, GitHub, or email login)
-- [ ] Protect game routes
+- [x] Integrate NextAuth.js (Google, GitHub, or email login)
+- [x] Protect game routes
 
 ### 2.3. Database
 - [ ] Set up PostgreSQL (Supabase/Neon/PlanetScale)
