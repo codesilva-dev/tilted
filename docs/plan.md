@@ -22,7 +22,7 @@
 - [x] Protect game routes
 
 ### 2.3. Database
-- [ ] Set up PostgreSQL (Supabase/Neon/PlanetScale)
+- [x] Set up PostgreSQL (Supabase/Neon/PlanetScale)
 - [ ] Create tables: users, games, hands, moves
 
 ### 2.4. Real-time Backend

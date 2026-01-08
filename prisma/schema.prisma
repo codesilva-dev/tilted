@@ -1,0 +1,335 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// USER MANAGEMENT
+// ============================================================================
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(50)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  totalChips   BigInt   @default(10000) @map("total_chips")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tableSeats TableSeat[]
+
+  @@index([username])
+  @@index([email])
+  @@map("users")
+}
+
+// ============================================================================
+// TABLE MANAGEMENT
+// ============================================================================
+
+enum TableType {
+  cash_game
+  tournament
+
+  @@map("table_type")
+}
+
+enum TableStatus {
+  waiting
+  active
+  paused
+  closed
+
+  @@map("table_status")
+}
+
+model Table {
+  id            String      @id @default(uuid()) @db.Uuid
+  name          String      @db.VarChar(100)
+  tableType     TableType   @default(cash_game) @map("table_type")
+  maxSeats      Int         @default(6) @db.SmallInt
+  smallBlind    Int
+  bigBlind      Int         @map("big_blind")
+  minBuyin      Int         @map("min_buyin")
+  maxBuyin      Int         @map("max_buyin")
+  status        TableStatus @default(waiting)
+  currentHandId String?     @map("current_hand_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  seats        TableSeat[]
+  hands        Hand[]
+  currentHand  Hand?       @relation("CurrentHand", fields: [currentHandId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@map("tables")
+}
+
+enum SeatStatus {
+  active
+  sitting_out
+  away
+  left
+
+  @@map("seat_status")
+}
+
+model TableSeat {
+  id            String     @id @default(uuid()) @db.Uuid
+  tableId       String     @map("table_id") @db.Uuid
+  userId        String     @map("user_id") @db.Uuid
+  seatPosition  Int        @map("seat_position") @db.SmallInt
+  stack         BigInt
+  status        SeatStatus @default(active)
+  isDealer      Boolean    @default(false) @map("is_dealer")
+  isSmallBlind  Boolean    @default(false) @map("is_small_blind")
+  isBigBlind    Boolean    @default(false) @map("is_big_blind")
+  joinedAt      DateTime   @default(now()) @map("joined_at")
+  leftAt        DateTime?  @map("left_at")
+
+  // Relations
+  table       Table        @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  handPlayers HandPlayer[]
+
+  @@unique([tableId, seatPosition])
+  @@unique([tableId, userId])
+  @@index([tableId])
+  @@index([userId])
+  @@index([tableId, status])
+  @@map("table_seats")
+}
+
+// ============================================================================
+// HAND MANAGEMENT
+// ============================================================================
+
+enum Street {
+  preflop
+  flop
+  turn
+  river
+  showdown
+
+  @@map("street")
+}
+
+enum HandStatus {
+  in_progress
+  completed
+  cancelled
+
+  @@map("hand_status")
+}
+
+model Hand {
+  id               String     @id @default(uuid()) @db.Uuid
+  tableId          String     @map("table_id") @db.Uuid
+  handNumber       Int        @map("hand_number")
+  dealerSeat       Int        @map("dealer_seat") @db.SmallInt
+  smallBlindSeat   Int        @map("small_blind_seat") @db.SmallInt
+  bigBlindSeat     Int        @map("big_blind_seat") @db.SmallInt
+  smallBlindAmount Int        @map("small_blind_amount")
+  bigBlindAmount   Int        @map("big_blind_amount")
+  
+  // Current state
+  currentStreet      Street     @default(preflop) @map("current_street")
+  currentBet         Int        @default(0) @map("current_bet")
+  lastRaiseAmount    Int        @default(0) @map("last_raise_amount")
+  activeSeat         Int?       @map("active_seat") @db.SmallInt
+  
+  // Pots (denormalized)
+  totalPot    Int @default(0) @map("total_pot")
+  mainPot     Int @default(0) @map("main_pot")
+  
+  status      HandStatus @default(in_progress)
+  startedAt   DateTime   @default(now()) @map("started_at")
+  completedAt DateTime?  @map("completed_at")
+
+  // Relations
+  table          Table           @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  tablesWithCurrentHand Table[]  @relation("CurrentHand")
+  players        HandPlayer[]
+  actions        Action[]
+  communityCards CommunityCard[]
+  pots           Pot[]
+
+  @@unique([tableId, handNumber])
+  @@index([tableId])
+  @@index([tableId, status])
+  @@map("hands")
+}
+
+enum HandPlayerStatus {
+  active
+  folded
+  all_in
+  out
+
+  @@map("hand_player_status")
+}
+
+enum ActionType {
+  fold
+  check
+  call
+  bet
+  raise
+  all_in
+  post_blind
+
+  @@map("action_type")
+}
+
+model HandPlayer {
+  id          String           @id @default(uuid()) @db.Uuid
+  handId      String           @map("hand_id") @db.Uuid
+  tableSeatId String           @map("table_seat_id") @db.Uuid
+  seatPosition Int             @map("seat_position") @db.SmallInt
+  
+  // Starting state
+  startingStack Int @map("starting_stack")
+  
+  // Current state
+  currentStack           Int @map("current_stack")
+  totalBetCurrentStreet  Int @default(0) @map("total_bet_current_street")
+  totalBetHand           Int @default(0) @map("total_bet_hand")
+  
+  // Hole cards
+  holeCard1     String?  @map("hole_card_1") @db.VarChar(3)
+  holeCard2     String?  @map("hole_card_2") @db.VarChar(3)
+  cardsRevealed Boolean  @default(false) @map("cards_revealed")
+  
+  // Status
+  status       HandPlayerStatus @default(active)
+  lastAction   ActionType?      @map("last_action")
+  lastActionAt DateTime?        @map("last_action_at")
+  
+  // Results
+  finalHandRank  String? @map("final_hand_rank") @db.VarChar(50)
+  handRankValue  Int?    @map("hand_rank_value")
+  totalWon       Int     @default(0) @map("total_won")
+
+  // Relations
+  hand       Hand        @relation(fields: [handId], references: [id], onDelete: Cascade)
+  tableSeat  TableSeat   @relation(fields: [tableSeatId], references: [id])
+  actions    Action[]
+  potWinnings PotWinner[]
+
+  @@unique([handId, seatPosition])
+  @@index([handId])
+  @@index([handId, status])
+  @@index([handId, status, seatPosition])
+  @@map("hand_players")
+}
+
+// ============================================================================
+// ACTIONS & GAMEPLAY
+// ============================================================================
+
+model Action {
+  id           String     @id @default(uuid()) @db.Uuid
+  handId       String     @map("hand_id") @db.Uuid
+  handPlayerId String     @map("hand_player_id") @db.Uuid
+  seatPosition Int        @map("seat_position") @db.SmallInt
+  
+  actionType   ActionType @map("action_type")
+  amount       Int        @default(0)
+  
+  street          Street @map("street")
+  actionSequence  Int    @map("action_sequence")
+  
+  // Context
+  potBeforeAction Int? @map("pot_before_action")
+  betToMatch      Int? @map("bet_to_match")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  hand       Hand       @relation(fields: [handId], references: [id], onDelete: Cascade)
+  handPlayer HandPlayer @relation(fields: [handPlayerId], references: [id])
+
+  @@unique([handId, actionSequence])
+  @@index([handId])
+  @@index([handId, actionSequence])
+  @@index([handPlayerId])
+  @@map("actions")
+}
+
+model CommunityCard {
+  id           String   @id @default(uuid()) @db.Uuid
+  handId       String   @map("hand_id") @db.Uuid
+  card         String   @db.VarChar(3)
+  cardPosition Int      @map("card_position") @db.SmallInt
+  street       Street
+  revealedAt   DateTime @default(now()) @map("revealed_at")
+
+  // Relations
+  hand Hand @relation(fields: [handId], references: [id], onDelete: Cascade)
+
+  @@unique([handId, cardPosition])
+  @@index([handId])
+  @@map("community_cards")
+}
+
+// ============================================================================
+// POT MANAGEMENT
+// ============================================================================
+
+enum PotType {
+  main
+  side
+
+  @@map("pot_type")
+}
+
+model Pot {
+  id        String  @id @default(uuid()) @db.Uuid
+  handId    String  @map("hand_id") @db.Uuid
+  potType   PotType @map("pot_type")
+  potNumber Int     @default(0) @map("pot_number")
+  amount    Int
+  
+  // Eligible players (array of hand_player_ids)
+  eligiblePlayerIds Json @map("eligible_player_ids")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  hand    Hand        @relation(fields: [handId], references: [id], onDelete: Cascade)
+  winners PotWinner[]
+
+  @@index([handId])
+  @@index([handId, potType, potNumber])
+  @@map("pots")
+}
+
+model PotWinner {
+  id           String @id @default(uuid()) @db.Uuid
+  potId        String @map("pot_id") @db.Uuid
+  handPlayerId String @map("hand_player_id") @db.Uuid
+  amountWon    Int    @map("amount_won")
+  winningHand  String @map("winning_hand") @db.VarChar(100)
+  
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  pot        Pot        @relation(fields: [potId], references: [id], onDelete: Cascade)
+  handPlayer HandPlayer @relation(fields: [handPlayerId], references: [id])
+
+  @@index([potId])
+  @@index([handPlayerId])
+  @@map("pot_winners")
+}
