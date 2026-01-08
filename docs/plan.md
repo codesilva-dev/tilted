@@ -13,9 +13,9 @@
 ## 2. Milestones
 
 ### 2.1. Project Setup
-- [ ] Create Next.js app with TypeScript
-- [ ] Set up Tailwind CSS
-- [ ] Set up ESLint/Prettier
+- [x] Create Next.js app with TypeScript
+- [x] Set up Tailwind CSS
+- [x] Set up ESLint/Prettier
 
 ### 2.2. Authentication
 - [ ] Integrate NextAuth.js (Google, GitHub, or email login)
