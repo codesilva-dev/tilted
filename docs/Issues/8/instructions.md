@@ -8,7 +8,7 @@ Set up authentication in the Poker App using NextAuth.js, Prisma, and Supabase (
 
 ## Steps
 
-### 1. Install Dependencies []
+### 1. Install Dependencies [x]
 
 ```bash
 npm install next-auth @next-auth/prisma-adapter @prisma/client
@@ -16,7 +16,7 @@ npm install next-auth @next-auth/prisma-adapter @prisma/client
 
 ---
 
-### 2. Configure Prisma
+### 2. Configure Prisma [x]
 
 - Ensure your `prisma/schema.prisma` is set up for NextAuth.js models (User, Account, Session, VerificationToken).
 - Run:
@@ -27,7 +27,7 @@ npm install next-auth @next-auth/prisma-adapter @prisma/client
 
 ---
 
-### 3. Set Up Environment Variables
+### 3. Set Up Environment Variables [x]
 
 Add the following to your `.env.local`:
 
@@ -42,7 +42,7 @@ GITHUB_CLIENT_SECRET=your_github_client_secret
 
 ---
 
-### 4. Configure NextAuth.js
+### 4. Configure NextAuth.js [x]
 
 Create or update `src/pages/api/auth/[...nextauth].ts`:
 
@@ -55,6 +55,7 @@ import { prisma } from "../../../lib/prisma"; // adjust path as needed
 
 export default NextAuth({
   adapter: PrismaAdapter(prisma),
+
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -66,28 +67,31 @@ export default NextAuth({
     }),
     // Add EmailProvider if needed
   ],
+
   session: {
     strategy: "jwt",
   },
+
   callbacks: {
     async session({ session, token, user }) {
       // Optionally attach user info to session
       return session;
     },
+    
   },
 });
 ```
 
 ---
 
-### 5. Protect Routes
+### 5. Protect Routes [x]
 
 - Use `useSession` in React components to check authentication.
 - Use `getServerSession` in API routes or server components.
 
 ---
 
-### 6. Test Authentication
+### 6. Test Authentication [x]
 
 - Start your app and test login, logout, and session persistence.
 - Check that user and session data is stored in Supabase.

@@ -20,11 +20,11 @@
 ### 2.2. Authentication
 - [x] Integrate NextAuth.js (Google, GitHub, or email login)
 - [x] Protect game routes
-- [ ] Configure Prisma adapter for NextAuth.js
-- [ ] Connect Prisma to Supabase PostgreSQL
-- [ ] Store user/session/account data in Supabase via Prisma
-- [ ] Document environment variables for providers and database connection
-- [ ] Test login, logout, and session persistence
+- [x] Configure Prisma adapter for NextAuth.js
+- [x] Connect Prisma to Supabase PostgreSQL
+- [x] Store user/session/account data in Supabase via Prisma
+- [x] Document environment variables for providers and database connection
+- [x] Test login, logout, and session persistence
 
 ### 2.3. Database
 - [x] Set up PostgreSQL (Supabase/Neon/PlanetScale)
