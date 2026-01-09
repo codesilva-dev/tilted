@@ -8,7 +8,7 @@ Set up authentication in the Poker App using NextAuth.js, Prisma, and Supabase (
 
 ## Steps
 
-### 1. Install Dependencies
+### 1. Install Dependencies []
 
 ```bash
 npm install next-auth @next-auth/prisma-adapter @prisma/client
