@@ -20,20 +20,28 @@
 ### 2.2. Authentication
 - [x] Integrate NextAuth.js (Google, GitHub, or email login)
 - [x] Protect game routes
+- [x] Configure Prisma adapter for NextAuth.js
+- [x] Connect Prisma to Supabase PostgreSQL
+- [x] Store user/session/account data in Supabase via Prisma
+- [x] Document environment variables for providers and database connection
+- [x] Test login, logout, and session persistence
 
 ### 2.3. Database
 - [x] Set up PostgreSQL (Supabase/Neon/PlanetScale)
 - [x] Create tables: users, games, hands, moves
 
-### 2.4. Real-time Backend
+### 2.4. Real-time Backend (Node.js + Socket.IO)
 - [ ] Create Node.js server with Socket.IO
 - [ ] Connect backend to database
-- [ ] Implement game logic (join table, deal cards, betting, etc.)
+- [ ] Implement join table & player management (Socket.IO events, DB connection)
+- [ ] Implement dealing hands logic (deal cards to players, send hand info)
+- [ ] Implement betting logic (betting rounds, player actions: bet, fold, call, etc.)
 
-### 2.5. Frontend Game UI
-- [ ] Lobby: list/join/create games
-- [ ] Game table: show cards, players, actions
-- [ ] Real-time updates via Socket.IO client
+### 2.5. Frontend Game UI (Next.js + Socket.IO Client)
+- [ ] Lobby: list/join/create games (UI + real-time updates)
+- [ ] Game table: show cards, players, actions (UI)
+- [ ] Real-time updates via Socket.IO client (integrate backend events, update UI)
+
 
 ### 2.6. Testing & QA
 - [ ] Unit tests (Jest)
