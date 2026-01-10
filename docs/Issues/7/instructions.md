@@ -28,7 +28,7 @@ We'll build **bottom to top** (1 → 7), testing each layer before moving up.
 
 ---
 
-## Phase 1: Core Poker Logic (No Server, No Database)
+## Phase 1: Core Poker Logic (No Server, No Database) [x]
 
 **Goal:** Build testable poker utilities that work in pure JavaScript/TypeScript.
 
@@ -93,7 +93,7 @@ test('finds best 5-card combination from 7 cards', () => { ... })
 
 **Goal:** Model the "snapshot" of a poker game at any moment.
 
-### Step 2.1: Type Definitions
+### Step 2.1: Type Definitions [x]
 
 **File:** `src/game/types/game-state.ts`
 
@@ -133,7 +133,7 @@ interface GameAction {
 
 **Why separate types?** These are your "contract". They define what a poker game looks like. Frontend, backend, database all use these same types.
 
-### Step 2.2: State Manager
+### Step 2.2: State Manager [x]
 
 **File:** `src/game/state/state-manager.ts`
 
@@ -173,7 +173,7 @@ test('pot increases when player bets', () => { ... })
 
 ---
 
-## Phase 3: Game Rules & Action Validation
+## Phase 3: Game Rules & Action Validation [x]
 
 **Goal:** Enforce poker rules without running a full game.
 
