@@ -58,7 +58,7 @@ test('shuffleDeck randomizes order', () => { ... })
 test('dealCards removes cards from deck', () => { ... })
 ```
 
-### Step 1.2: Hand Evaluation
+### Step 1.2: Hand Evaluation [x]
 
 **File:** `src/game/core/hand-evaluator.ts`
 
