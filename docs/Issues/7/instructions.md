@@ -32,7 +32,7 @@ We'll build **bottom to top** (1 → 7), testing each layer before moving up.
 
 **Goal:** Build testable poker utilities that work in pure JavaScript/TypeScript.
 
-### Step 1.1: Card & Deck Utilities
+### Step 1.1: Card & Deck Utilities [x]
 
 **File:** `src/game/core/cards.ts`
 
