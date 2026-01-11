@@ -33,6 +33,12 @@ export interface TableState {
     communityCards: Card[];
     pot: number;
     currentBet: number;
+    /**
+     * The size of the last raise in this betting round.
+     * Used to determine minimum raise amount.
+     * Resets to bigBlind at start of each street.
+     */
+    lastRaiseAmount: number;
     activePlayerPosition: number | null;
     deck: Card[];
     handStartedAt: Date;
@@ -120,6 +126,7 @@ export function createInitialTableState(
     communityCards: [],
     pot: 0,
     currentBet: 0,
+    lastRaiseAmount: bigBlind, // Initialize to big blind
     activePlayerPosition: null,
     deck: createDeck(),  // From cards.ts
     handStartedAt: new Date(),

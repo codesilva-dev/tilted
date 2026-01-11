@@ -70,6 +70,7 @@ export function dealFlop(table: TableState): TableState {
     deck: remaining,
     currentStreet: 'flop',
     currentBet: 0, // Reset current bet for new street
+    lastRaiseAmount: table.bigBlind, // Reset to big blind for new street
     players: table.players.map(p => ({
       ...p,
       currentBet: 0, // Reset current bet for new street
@@ -93,6 +94,7 @@ export function dealTurn(table: TableState): TableState {
     deck: remaining,
     currentStreet: 'turn',
     currentBet: 0,
+    lastRaiseAmount: table.bigBlind, // Reset to big blind for new street
     players: table.players.map(p => ({
       ...p,
       currentBet: 0,
@@ -116,6 +118,7 @@ export function dealRiver(table: TableState): TableState {
     deck: remaining,
     currentStreet: 'river',
     currentBet: 0,
+    lastRaiseAmount: table.bigBlind, // Reset to big blind for new street
     players: table.players.map(p => ({
       ...p,
       currentBet: 0,
@@ -184,6 +187,7 @@ export function processAction(table: TableState, action: GameAction): TableState
       player.totalBetInHand += betAmount;
       newTable.pot += betAmount;
       newTable.currentBet = betAmount;
+      newTable.lastRaiseAmount = betAmount; // Track the bet size
       player.hasActed = true;
 
       // Mark other active players as not acted (they need to respond)
@@ -207,15 +211,19 @@ export function processAction(table: TableState, action: GameAction): TableState
         throw new Error('Raise amount is required');
       }
 
+      const previousBet = newTable.currentBet;
+
       // Amount should be the NEW total bet (not the raise amount)
       const totalBet = Math.min(action.amount, player.stack + player.currentBet);
       const additionalAmount = totalBet - player.currentBet;
+      const raiseSize = totalBet - previousBet; // Size of the raise
 
       player.stack -= additionalAmount;
       player.currentBet = totalBet;
       player.totalBetInHand += additionalAmount;
       newTable.pot += additionalAmount;
       newTable.currentBet = totalBet;
+      newTable.lastRaiseAmount = raiseSize; // Track the raise size
       player.hasActed = true;
 
       // Mark other active players as not acted (they need to respond)
@@ -233,6 +241,8 @@ export function processAction(table: TableState, action: GameAction): TableState
 
     case 'all-in': {
       const allInAmount = player.stack;
+      const previousBet = newTable.currentBet;
+
       player.stack = 0;
       player.currentBet += allInAmount;
       player.totalBetInHand += allInAmount;
@@ -242,7 +252,9 @@ export function processAction(table: TableState, action: GameAction): TableState
 
       // Update current bet if this all-in is higher
       if (player.currentBet > newTable.currentBet) {
+        const raiseSize = player.currentBet - previousBet;
         newTable.currentBet = player.currentBet;
+        newTable.lastRaiseAmount = raiseSize; // Track the raise size
 
         // Mark other active players as not acted
         newTable.players.forEach(p => {
@@ -302,7 +314,8 @@ export function advanceToNextStreet(table: TableState): TableState {
       currentBet: 0,
       hasActed: false
     })),
-    currentBet: 0
+    currentBet: 0,
+    lastRaiseAmount: table.bigBlind // Reset to big blind for new street
   };
 
   // Determine next street
@@ -372,6 +385,7 @@ export function resetForNextHand(table: TableState): TableState {
     communityCards: [],
     pot: 0,
     currentBet: 0,
+    lastRaiseAmount: table.bigBlind, // Reset to big blind for new hand
     activePlayerPosition: null,
     deck: [], // Will be set when starting hand
     handStartedAt: new Date(),
