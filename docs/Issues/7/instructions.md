@@ -177,7 +177,7 @@ test('pot increases when player bets', () => { ... })
 
 **Goal:** Enforce poker rules without running a full game.
 
-### Step 3.1: Action Validator
+### Step 3.1: Action Validator [x]
 
 **File:** `src/game/rules/action-validator.ts`
 
@@ -210,7 +210,7 @@ function getBettingLimits(
 - Minimum raise = previous raise size
 - Can't act out of turn
 
-### Step 3.2: Pot Calculator
+### Step 3.2: Pot Calculator [x]
 
 **File:** `src/game/rules/pot-calculator.ts`
 
@@ -239,7 +239,7 @@ function distributePots(
 
 **Goal:** Run a complete hand from start to finish using all previous layers.
 
-### Step 4.1: Hand Controller
+### Step 4.1: Hand Controller [x]
 
 **File:** `src/game/engine/hand-controller.ts`
 

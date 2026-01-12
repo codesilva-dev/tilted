@@ -5,14 +5,17 @@ import { Card } from "../core/cards";
 
 export function calculatePots(table: TableState): Pot[] {
   const pots: Pot[] = [];
-  const playersInHand = table.players.filter(p => isPlayerInHand(p));
 
-  if (playersInHand.length === 0) {
+  // Include ALL players who contributed chips (including folded players)
+  // This ensures folded players' chips are included in pot calculations
+  const playersWhoContributed = table.players.filter(p => p.totalBetInHand > 0);
+
+  if (playersWhoContributed.length === 0) {
     return pots;
   }
 
   // Sort players by total bet amount (ascending)
-  const sortedPlayers = [...playersInHand].sort((a, b) => a.totalBetInHand - b.totalBetInHand);
+  const sortedPlayers = [...playersWhoContributed].sort((a, b) => a.totalBetInHand - b.totalBetInHand);
 
   let remainingPlayers = [...sortedPlayers];
   let previousBetLevel = 0;
@@ -23,6 +26,8 @@ export function calculatePots(table: TableState): Pot[] {
 
     // Skip if this player bet the same as previous (no new pot needed)
     if (currentBetLevel === previousBetLevel) {
+      // Still need to remove this player from remaining
+      remainingPlayers = remainingPlayers.filter(p => p.id !== currentPlayer.id);
       continue;
     }
 
@@ -30,14 +35,20 @@ export function calculatePots(table: TableState): Pot[] {
     const potAmount = betIncrement * remainingPlayers.length;
 
     if (potAmount > 0) {
+      // Only include players still in the hand as eligible winners
+      // Folded players contribute to the pot but can't win it
+      const eligiblePlayerIds = remainingPlayers
+        .filter(p => isPlayerInHand(p))
+        .map(p => p.id);
+
       pots.push({
         amount: potAmount,
-        eligiblePlayers: remainingPlayers.map(p => p.id),
+        eligiblePlayers: eligiblePlayerIds,
         type: pots.length === 0 ? 'main' : 'side'
       });
     }
 
-    // Remove current player from remaining (they're all-in at this level)
+    // Remove current player from remaining (they're all-in at this level or folded)
     remainingPlayers = remainingPlayers.filter(p => p.id !== currentPlayer.id);
     previousBetLevel = currentBetLevel;
 

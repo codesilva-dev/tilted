@@ -144,11 +144,30 @@ describe('calculatePots', () => {
 
     const pots = calculatePots(table);
 
-    // Should only count Bob and Charlie (Alice folded)
-    expect(pots).toHaveLength(1);
-    expect(pots[0].amount).toBe(1000); // 500 * 2
+    // Alice contributed 200 chips (folded), Bob and Charlie each contributed 500 chips
+    // This should create 2 pots:
+    // Pot 1 (main): 200 * 3 = 600 (Alice's level, eligible: Bob, Charlie - Alice folded)
+    // Pot 2 (side): 300 * 2 = 600 (Bob and Charlie's additional 300, eligible: Bob, Charlie)
+    expect(pots).toHaveLength(2);
+
+    // Main pot: Alice's 200 chips level
+    expect(pots[0].amount).toBe(600); // 200 * 3 players
+    expect(pots[0].type).toBe('main');
     expect(pots[0].eligiblePlayers).toHaveLength(2);
-    expect(pots[0].eligiblePlayers).not.toContain('p1');
+    expect(pots[0].eligiblePlayers).toContain('p2'); // Bob eligible
+    expect(pots[0].eligiblePlayers).toContain('p3'); // Charlie eligible
+    expect(pots[0].eligiblePlayers).not.toContain('p1'); // Alice folded, not eligible
+
+    // Side pot: Bob and Charlie's additional 300
+    expect(pots[1].amount).toBe(600); // 300 * 2 players
+    expect(pots[1].type).toBe('side');
+    expect(pots[1].eligiblePlayers).toHaveLength(2);
+    expect(pots[1].eligiblePlayers).toContain('p2'); // Bob eligible
+    expect(pots[1].eligiblePlayers).toContain('p3'); // Charlie eligible
+
+    // Total pot should equal all contributions
+    const totalPot = pots.reduce((sum, pot) => sum + pot.amount, 0);
+    expect(totalPot).toBe(1200); // 200 + 500 + 500
   });
 
   test('returns empty array when no players in hand', () => {
