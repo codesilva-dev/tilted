@@ -31,16 +31,16 @@
 - [x] Create tables: users, games, hands, moves
 
 ### 2.4. Real-time Backend (Node.js + Socket.IO)
-- [ ] Create Node.js server with Socket.IO
-- [ ] Connect backend to database
-- [ ] Implement join table & player management (Socket.IO events, DB connection)
-- [ ] Implement dealing hands logic (deal cards to players, send hand info)
-- [ ] Implement betting logic (betting rounds, player actions: bet, fold, call, etc.)
+- [x] Create Node.js server with Socket.IO
+- [x] Connect backend to database
+- [x] Implement join table & player management (Socket.IO events, DB connection)
+- [x] Implement dealing hands logic (deal cards to players, send hand info)
+- [x] Implement betting logic (betting rounds, player actions: bet, fold, call, etc.)
 
 ### 2.5. Frontend Game UI (Next.js + Socket.IO Client)
-- [ ] Lobby: list/join/create games (UI + real-time updates)
-- [ ] Game table: show cards, players, actions (UI)
-- [ ] Real-time updates via Socket.IO client (integrate backend events, update UI)
+- [x] Lobby: list/join/create games (UI + real-time updates)
+- [x] Game table: show cards, players, actions (UI)
+- [x] Real-time updates via Socket.IO client (integrate backend events, update UI)
 
 
 ### 2.6. Testing & QA

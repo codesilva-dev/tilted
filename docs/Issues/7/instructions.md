@@ -302,7 +302,7 @@ test('complete hand with one winner', async () => {
 })
 ```
 
-### Step 4.2: Betting Round Manager
+### Step 4.2: Betting Round Manager [x]
 
 **File:** `src/game/engine/betting-round.ts`
 
