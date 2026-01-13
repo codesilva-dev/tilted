@@ -4,10 +4,19 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:socket": "ts-node-dev --respawn --transpile-only --project tsconfig.server.json src/server/socket-server.ts",
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:socket\"",
     "build": "next build",
+    "build:socket": "tsc --project tsconfig.server.json",
     "start": "next start",
+    "start:socket": "node dist/server/socket-server.js",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:verbose": "jest --verbose",
+    "test:socket": "ts-node src/server/test-client.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -18,18 +27,27 @@
     "next-auth": "^4.24.13",
     "pg": "^8.16.3",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "@jest/globals": "^30.2.0",
     "@tailwindcss/postcss": "^4",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/pg": "^8.16.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/socket.io": "^3.0.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "jest": "^30.2.0",
     "prisma": "^7.2.0",
+    "socket.io-client": "^4.8.3",
     "tailwindcss": "^4",
+    "ts-jest": "^29.4.6",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5"
   }
 }
