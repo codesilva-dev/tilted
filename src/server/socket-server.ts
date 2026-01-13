@@ -14,7 +14,13 @@ import { TableState, GameAction, createInitialTableState, createPlayer } from '.
  */
 
 // Port configuration
-const PORT = process.env.SOCKET_PORT ? parseInt(process.env.SOCKET_PORT) : 3001;
+// Railway and other platforms set PORT env var, use that if available
+const PORT = process.env.PORT
+  ? parseInt(process.env.PORT)
+  : process.env.SOCKET_PORT
+    ? parseInt(process.env.SOCKET_PORT)
+    : 3001;
+
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 // Game room management

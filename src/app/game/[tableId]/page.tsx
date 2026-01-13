@@ -102,29 +102,41 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   const isMyTurn = activePlayer?.id === playerId;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
+    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white">
+      {/* Header */}
+      <header className="border-b border-gray-700 bg-gray-900/50 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-8 py-4 flex justify-between items-center">
+          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+            <span className="text-3xl">♠</span>
+            <h1 className="text-2xl font-bold">Tilted</h1>
+          </Link>
+          <div className="flex items-center gap-6">
+            <Link href="/" className="text-gray-300 hover:text-white transition-colors">
+              Home
+            </Link>
+            <Link href="/lobby" className="text-gray-300 hover:text-white transition-colors">
+              Lobby
+            </Link>
+            <div className="text-sm text-gray-400">
+              Playing as: <span className="text-white font-semibold">{playerName}</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-6xl mx-auto p-8">
+        {/* Table Header */}
         <div className="mb-8">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h1 className="text-4xl font-bold mb-2">Table {tableId}</h1>
+              <h2 className="text-4xl font-bold mb-2">Table {tableId}</h2>
               <div className="flex gap-4 text-sm">
                 <span className="bg-green-600 px-3 py-1 rounded">Connected</span>
                 <span className="text-gray-400">
                   {gameState.players.length} players
                 </span>
-                <span className="bg-blue-600 px-3 py-1 rounded">
-                  Playing as: {playerName}
-                </span>
               </div>
             </div>
-            <Link
-              href="/"
-              className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg transition-colors"
-            >
-              ← Home
-            </Link>
           </div>
         </div>
 
