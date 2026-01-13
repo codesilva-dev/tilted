@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:socket": "ts-node-dev --respawn --transpile-only src/server/socket-server.ts",
+    "dev:socket": "ts-node-dev --respawn --transpile-only --project tsconfig.server.json src/server/socket-server.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:socket\"",
     "build": "next build",
     "start": "next start",

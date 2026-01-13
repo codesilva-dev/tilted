@@ -328,11 +328,11 @@ class BettingRound {
 
 ---
 
-## Phase 5: Socket.IO Server Layer
+## Phase 5: Socket.IO Server Layer [x]
 
 **Goal:** Expose the game engine over WebSockets.
 
-### Step 5.1: Create Socket.IO Server
+### Step 5.1: Create Socket.IO Server [x]
 
 **File:** `src/server/socket-server.ts`
 
@@ -392,7 +392,7 @@ io.on('connection', (socket) => {
 2. Calls engine methods
 3. Broadcasts engine events to clients
 
-### Step 5.2: Connect Engine Events to Socket.IO
+### Step 5.2: Connect Engine Events to Socket.IO [x]
 
 ```typescript
 class HandController {

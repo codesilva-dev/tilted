@@ -20,7 +20,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 // Game room management
 interface GameRoom {
   tableId: string;
-  controller: HandController;
+  controller: HandController  ;
   players: Set<string>; // Player IDs in this room
 }
 
