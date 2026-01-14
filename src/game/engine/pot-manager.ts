@@ -129,20 +129,34 @@ export function distributePots(table: TableState): { table: TableState; result: 
   const potResults: PotResult[] = [];
 
   let totalDistributed = 0;
+  const winnerIds = new Set<string>();
+
+  // First, evaluate hands for all players who went to showdown
+  const playersInShowdown = table.players.filter(p => isPlayerInHand(p) && p.holeCards.length > 0);
+  for (const player of playersInShowdown) {
+    const allCards = [...player.holeCards, ...table.communityCards];
+    player.handRank = findBestHand(allCards);
+  }
 
   // Determine winners for each pot
   for (const pot of pots) {
     const potResult = determineWinnersForPot(pot, table.players, table.communityCards);
     potResults.push(potResult);
 
-    // Award winnings
+    // Award winnings and mark winners
     for (const winner of potResult.winners) {
       const player = table.players.find(p => p.id === winner.playerId);
       if (player) {
         player.stack += winner.amountWon;
         totalDistributed += winner.amountWon;
+        winnerIds.add(winner.playerId);
       }
     }
+  }
+
+  // Mark winners
+  for (const player of table.players) {
+    player.isWinner = winnerIds.has(player.id);
   }
 
   const handResult: HandResult = {
@@ -208,10 +222,15 @@ export function endHandByFold(table: TableState): { table: TableState; result: H
     completedAt: new Date()
   };
 
+  // Mark winner
+  winner.isWinner = true;
+
   return {
     table: {
       ...table,
+      currentStreet: 'showdown',
       pot: 0,
+      activePlayerPosition: null,
       players: [...table.players]
     },
     result: handResult

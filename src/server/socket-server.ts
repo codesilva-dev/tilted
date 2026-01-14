@@ -144,7 +144,27 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
           table: event.table,
           result: event.result
         });
+        io.to(tableId).emit('game-state', { table: event.table });
         console.log(`[Event] Hand completed at table ${tableId}`);
+        // Leaving players will be removed when startHand is called after the countdown
+        break;
+
+      case 'players-removed':
+        // Clean up server-side tracking for removed players
+        const roomForRemoval = gameRooms.get(tableId);
+        if (roomForRemoval) {
+          for (const player of event.removedPlayers) {
+            roomForRemoval.seatedPlayers.delete(player.id);
+            // Move to spectators so they can sit again
+            roomForRemoval.spectators.set(player.id, { id: player.id, name: player.name });
+            console.log(`[Event] Player ${player.name} moved to spectators`);
+          }
+        }
+
+        // Broadcast updated game state
+        io.to(tableId).emit('game-state', { table: event.table });
+        io.to(tableId).emit('players-removed', { playerIds: event.removedPlayers.map(p => p.id) });
+        console.log(`[Event] Removed ${event.removedPlayers.length} players from table ${tableId}`);
         break;
 
       case 'error':
@@ -338,7 +358,7 @@ io.on('connection', (socket: Socket) => {
   /**
    * Leave seat (stand up but stay in room)
    */
-  socket.on('leave-seat', (data: { tableId: string; playerId: string }) => {
+  socket.on('leave-seat', async (data: { tableId: string; playerId: string }) => {
     try {
       const { tableId, playerId } = data;
 
@@ -354,22 +374,59 @@ io.on('connection', (socket: Socket) => {
         throw new Error('Player not seated');
       }
 
-      // Remove from seated players
-      state.players = state.players.filter(p => p.id !== playerId);
-      room.seatedPlayers.delete(playerId);
+      const playerName = player.name;
+      const seatPosition = player.seatPosition;
 
-      // Add back to spectators
-      room.spectators.set(playerId, { id: playerId, name: player.name });
+      // Check if hand is in progress
+      const handInProgress = player.holeCards.length > 0;
 
-      // Broadcast updated state
-      io.to(tableId).emit('game-state', { table: state });
-      io.to(tableId).emit('player-left-seat', {
-        playerId,
-        seatPosition: player.seatPosition,
-        seatedCount: state.players.length
-      });
+      if (handInProgress) {
+        // Mid-hand: Fold and mark as leaving
+        if (player.status === 'active') {
+          console.log(`[Leave Seat] ${playerName} leaving mid-hand - folding and marking as leaving`);
+          const foldAction: GameAction = {
+            type: 'fold',
+            playerId,
+            timestamp: new Date()
+          };
+          await room.controller.handleAction(foldAction);
+        }
 
-      console.log(`[Leave Seat] ${player.name} left seat on ${tableId}`);
+        // Mark player as leaving (will be removed at end of hand)
+        room.controller.markPlayerAsLeaving(playerId);
+
+        // Get updated state after fold
+        const updatedState = room.controller.getState();
+
+        // Broadcast updated state (player still at table but folded and marked as leaving)
+        io.to(tableId).emit('game-state', { table: updatedState });
+
+        console.log(`[Leave Seat] ${playerName} marked as leaving, will be removed after hand`);
+
+      } else {
+        // No hand in progress: Remove immediately
+        console.log(`[Leave Seat] ${playerName} leaving between hands - removing immediately`);
+
+        // Remove from seated players using the controller method
+        room.controller.removePlayer(playerId);
+        room.seatedPlayers.delete(playerId);
+
+        // Add back to spectators
+        room.spectators.set(playerId, { id: playerId, name: playerName });
+
+        // Get updated state after removal
+        const updatedState = room.controller.getState();
+
+        // Broadcast updated state
+        io.to(tableId).emit('game-state', { table: updatedState });
+        io.to(tableId).emit('player-left-seat', {
+          playerId,
+          seatPosition,
+          seatedCount: updatedState.players.length
+        });
+
+        console.log(`[Leave Seat] ${playerName} left seat on ${tableId}`);
+      }
 
     } catch (error) {
       console.error('[Leave Seat Error]', error);
@@ -382,7 +439,7 @@ io.on('connection', (socket: Socket) => {
   /**
    * Leave room entirely
    */
-  socket.on('leave-room', (data: { tableId: string; playerId: string }) => {
+  socket.on('leave-room', async (data: { tableId: string; playerId: string }) => {
     try {
       const { tableId, playerId } = data;
 
@@ -391,19 +448,49 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
+      // If player is seated and in an active hand, fold them first
+      const state = room.controller.getState();
+      const player = state.players.find(p => p.id === playerId);
+
+      if (player) {
+        const handInProgress = player.holeCards.length > 0;
+
+        if (handInProgress) {
+          // Mid-hand: Fold and mark as leaving
+          if (player.status === 'active') {
+            console.log(`[Leave Room] ${player.name} leaving mid-hand - folding`);
+            const foldAction: GameAction = {
+              type: 'fold',
+              playerId,
+              timestamp: new Date()
+            };
+            await room.controller.handleAction(foldAction);
+          }
+
+          // Mark player as leaving
+          room.controller.markPlayerAsLeaving(playerId);
+
+          console.log(`[Leave Room] ${player.name} marked as leaving, will be removed after hand`);
+        } else {
+          // No hand in progress: Remove immediately
+          room.controller.removePlayer(playerId);
+          room.seatedPlayers.delete(playerId);
+          console.log(`[Leave Room] ${player.name} removed from table`);
+        }
+      }
+
       // Remove from spectators
       room.spectators.delete(playerId);
-
-      // Remove from seated players
-      const state = room.controller.getState();
-      state.players = state.players.filter(p => p.id !== playerId);
-      room.seatedPlayers.delete(playerId);
 
       socket.leave(tableId);
       socketToPlayer.delete(socket.id);
 
+      // Get updated state
+      const updatedState = room.controller.getState();
+
       // Notify others
       socket.to(tableId).emit('player-left-room', { playerId });
+      io.to(tableId).emit('game-state', { table: updatedState });
 
       console.log(`[Leave Room] ${playerId} left ${tableId}`);
 
@@ -431,14 +518,39 @@ io.on('connection', (socket: Socket) => {
         throw new Error('Table not found');
       }
 
+      // First, cleanup any leaving players
+      const leavingPlayers = room.controller.removeLeavingPlayers();
+      if (leavingPlayers.length > 0) {
+        // Move them to spectators
+        for (const player of leavingPlayers) {
+          room.seatedPlayers.delete(player.id);
+          room.spectators.set(player.id, { id: player.id, name: player.name });
+          console.log(`[Start Hand] Player ${player.name} removed and moved to spectators`);
+        }
+        io.to(tableId).emit('players-removed', { playerIds: leavingPlayers.map(p => p.id) });
+      }
+
+      // Check if we have enough players to start
+      const state = room.controller.getState();
+      const activePlayers = state.players.filter(p => !p.isLeaving);
+
+      if (activePlayers.length < 2) {
+        // Not enough players - just reset to waiting state, don't try to start
+        console.log(`[Start Hand] Not enough players (${activePlayers.length}) - resetting to waiting`);
+        room.controller.resetToWaiting();
+        const updatedState = room.controller.getState();
+        io.to(tableId).emit('game-state', { table: updatedState });
+        return;
+      }
+
+      // Enough players - start the hand
       console.log(`[Start Hand] Starting hand at table ${tableId}`);
       await room.controller.startHand();
 
     } catch (error) {
-      console.error('[Start Hand Error]', error);
-      socket.emit('action-error', {
-        message: error instanceof Error ? error.message : 'Failed to start hand'
-      });
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start hand';
+      console.error('[Start Hand Error]', errorMessage);
+      socket.emit('action-error', { message: errorMessage });
     }
   });
 
@@ -492,7 +604,7 @@ io.on('connection', (socket: Socket) => {
   /**
    * Handle disconnect
    */
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`[Disconnect] Client disconnected: ${socket.id}`);
 
     const playerInfo = socketToPlayer.get(socket.id);
@@ -501,14 +613,48 @@ io.on('connection', (socket: Socket) => {
       const room = gameRooms.get(tableId);
 
       if (room) {
+        // If player is seated and in an active hand, fold them first
+        const state = room.controller.getState();
+        const player = state.players.find(p => p.id === playerId);
+
+        if (player) {
+          const handInProgress = player.holeCards.length > 0;
+
+          if (handInProgress) {
+            // Mid-hand: Fold and mark as leaving
+            if (player.status === 'active') {
+              console.log(`[Disconnect] ${player.name} disconnected mid-hand - folding`);
+              try {
+                const foldAction: GameAction = {
+                  type: 'fold',
+                  playerId,
+                  timestamp: new Date()
+                };
+                await room.controller.handleAction(foldAction);
+              } catch (error) {
+                console.error('[Disconnect] Error folding player hand:', error);
+              }
+            }
+
+            // Mark player as leaving
+            room.controller.markPlayerAsLeaving(playerId);
+            console.log(`[Disconnect] ${player.name} marked as leaving, will be removed after hand`);
+          } else {
+            // No hand in progress: Remove immediately
+            room.controller.removePlayer(playerId);
+            room.seatedPlayers.delete(playerId);
+            console.log(`[Disconnect] ${player.name} removed from table`);
+          }
+        }
+
         // Remove from spectators and seated players
         room.spectators.delete(playerId);
-        room.seatedPlayers.delete(playerId);
 
-        const state = room.controller.getState();
-        state.players = state.players.filter(p => p.id !== playerId);
+        // Get updated state
+        const updatedState = room.controller.getState();
 
         socket.to(tableId).emit('player-disconnected', { playerId });
+        io.to(tableId).emit('game-state', { table: updatedState });
 
         console.log(`[Disconnect] Player ${playerId} disconnected from ${tableId}`);
 

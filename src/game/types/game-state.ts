@@ -17,6 +17,9 @@ export interface Player {
     currentBet: number;
     totalBetInHand: number;
     hasActed: boolean;
+    handRank?: HandRank; // Populated at showdown
+    isWinner?: boolean; // True if player won the hand
+    isLeaving?: boolean; // Player wants to leave but must wait until hand ends
 }
 
 export type Street = | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';

@@ -91,23 +91,22 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
 
     socket.on('player-seated', (data: { playerId: string; playerName: string; seatPosition: number; stack: number }) => {
       console.log('[Socket] Player seated:', data.playerName, 'at seat', data.seatPosition);
-      // Request updated game state
-      socket.emit('get-game-state', { tableId });
+      // Game state is already broadcast by server, no need to request it again
     });
 
     socket.on('player-left-seat', (data: { playerId: string; seatPosition: number }) => {
       console.log('[Socket] Player left seat:', data.seatPosition);
-      socket.emit('get-game-state', { tableId });
+      // Game state is already broadcast by server, no need to request it again
     });
 
     socket.on('player-left-room', (data: { playerId: string }) => {
       console.log('[Socket] Player left room:', data.playerId);
-      socket.emit('get-game-state', { tableId });
+      // Game state is already broadcast by server, no need to request it again
     });
 
     socket.on('player-disconnected', (data: { playerId: string }) => {
       console.log('[Socket] Player disconnected:', data.playerId);
-      socket.emit('get-game-state', { tableId });
+      // Game state is already broadcast by server, no need to request it again
     });
 
     // Hand events
@@ -139,6 +138,11 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     socket.on('hand-completed', (data: { table: TableState; result: any }) => {
       console.log('[Socket] Hand completed!');
       setGameState(data.table);
+    });
+
+    socket.on('players-removed', (data: { playerIds: string[] }) => {
+      console.log('[Socket] Players removed:', data.playerIds);
+      // Game state will be updated in the game-state event that follows
     });
 
     // Error handlers

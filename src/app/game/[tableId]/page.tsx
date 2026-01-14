@@ -1,7 +1,8 @@
 'use client';
 
-import { use, useEffect, useState, useCallback } from 'react';
+import { use, useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useGameSocketV2 } from './use-game-socket';
 import { useActionTimer } from './use-action-timer';
 import PokerTable from '@/components/poker/PokerTable';
@@ -36,10 +37,12 @@ function getOrCreatePlayerName(): string {
 
 export default function GamePage({ params }: { params: Promise<{ tableId: string }> }) {
   const { tableId } = use(params);
+  const router = useRouter();
 
   const [playerId, setPlayerId] = useState<string>('temp-id');
   const [playerName, setPlayerName] = useState<string>('Player');
   const [isClient, setIsClient] = useState(false);
+  const [isLeavingSeat, setIsLeavingSeat] = useState(false);
 
   useEffect(() => {
     setPlayerId(getOrCreatePlayerId());
@@ -55,6 +58,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     error,
     takeSeat,
     leaveSeat,
+    leaveRoom,
     startHand,
     takeAction
   } = useGameSocketV2({
@@ -90,6 +94,69 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     onTimeout: handleTimeout,
     timeLimit: 30
   });
+
+  // Handle standing up (leave seat)
+  const handleLeaveSeat = useCallback(() => {
+    if (isLeavingSeat) return; // Prevent double-clicks
+    setIsLeavingSeat(true);
+    leaveSeat();
+  }, [leaveSeat, isLeavingSeat]);
+
+  // Reset leaving seat state when player becomes unseated
+  useEffect(() => {
+    if (!isSeated && isLeavingSeat) {
+      setIsLeavingSeat(false);
+    }
+  }, [isSeated, isLeavingSeat]);
+
+  // Handle leaving the table
+  const handleLeaveTable = useCallback(() => {
+    leaveRoom();
+    router.push('/lobby');
+  }, [leaveRoom, router]);
+
+  // Auto-advance after showdown (10 second countdown)
+  // Only non-leaving players run the countdown to avoid duplicate startHand calls
+  const [showdownCountdown, setShowdownCountdown] = useState<number | null>(null);
+  const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Clear any existing timer
+    if (autoAdvanceTimerRef.current) {
+      clearInterval(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+
+    // Start countdown if at showdown, seated, and NOT leaving
+    // Players marked as leaving shouldn't trigger startHand
+    const isLeaving = currentPlayer?.isLeaving ?? false;
+    if (gameState?.currentStreet === 'showdown' && isSeated && !isLeaving) {
+      setShowdownCountdown(10);
+
+      autoAdvanceTimerRef.current = setInterval(() => {
+        setShowdownCountdown((prev) => {
+          if (prev === null || prev <= 1) {
+            // Time's up - try to start next hand (removes leaving players)
+            if (autoAdvanceTimerRef.current) {
+              clearInterval(autoAdvanceTimerRef.current);
+              autoAdvanceTimerRef.current = null;
+            }
+            startHand();
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => {
+        if (autoAdvanceTimerRef.current) {
+          clearInterval(autoAdvanceTimerRef.current);
+        }
+      };
+    } else {
+      setShowdownCountdown(null);
+    }
+  }, [gameState?.currentStreet, isSeated, currentPlayer?.isLeaving, startHand]);
 
   // Early returns AFTER all hooks
   if (!isClient || !isConnected) {
@@ -171,20 +238,27 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
 
           {/* Leave Seat / Leave Room buttons */}
           <div className="flex gap-3">
-            {isSeated && (
+            {isSeated && !currentPlayer?.isLeaving && (
               <button
-                onClick={leaveSeat}
-                className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                onClick={handleLeaveSeat}
+                disabled={isLeavingSeat}
+                className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors"
               >
-                Stand Up
+                {isLeavingSeat ? 'Standing Up...' : 'Stand Up'}
               </button>
             )}
-            <Link
-              href="/lobby"
-              className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+            {isSeated && currentPlayer?.isLeaving && (
+              <div className="bg-orange-600 text-white font-bold py-2 px-4 rounded-lg">
+                Leaving after hand...
+              </div>
+            )}
+            <button
+              onClick={handleLeaveTable}
+              disabled={currentPlayer?.isLeaving}
+              className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors"
             >
               Leave Table
-            </Link>
+            </button>
           </div>
         </div>
 
@@ -227,38 +301,45 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
             </div>
           )}
 
-          {/* Hand completed - show start next hand button */}
+          {/* Hand completed - show countdown */}
           {isSeated && gameState.currentStreet === 'showdown' && (
             <div className="space-y-4">
               <div className="bg-green-900/50 border border-green-500 rounded-lg p-4 mb-4">
                 <h3 className="text-green-400 font-bold text-xl mb-3">🎉 Hand Complete!</h3>
 
-                {/* Show all players' hole cards during showdown */}
-                <div className="space-y-2 mb-4">
-                  {gameState.players
-                    .filter(p => p.holeCards.length > 0)
-                    .map(player => (
-                      <div key={player.id} className="text-sm">
-                        <span className="font-semibold text-white">{player.name}:</span>
-                        <span className="ml-2 text-gray-300">
-                          {player.holeCards.map(card => `${card.rank}${
-                            card.suit === 'hearts' ? '♥' :
-                            card.suit === 'diamonds' ? '♦' :
-                            card.suit === 'clubs' ? '♣' : '♠'
-                          }`).join(' ')}
+                {/* Show winners */}
+                {gameState.players
+                  .filter(p => p.isWinner)
+                  .map(player => (
+                    <div key={player.id} className="text-lg mb-2">
+                      <span className="text-yellow-400">👑 </span>
+                      <span className="font-bold text-white">{player.name}</span>
+                      <span className="text-green-400"> wins!</span>
+                      {player.handRank && (
+                        <span className="ml-2 text-sm text-gray-300">
+                          ({player.handRank.description})
                         </span>
-                      </div>
-                    ))}
-                </div>
+                      )}
+                    </div>
+                  ))}
 
-                <p className="text-gray-300 text-sm">Check player stacks to see who won. Winners have been paid out.</p>
+                <p className="text-gray-300 text-sm mt-3">Check the table to see all hands and updated stacks.</p>
               </div>
-              <button
-                onClick={startHand}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg w-full"
-              >
-                Start Next Hand
-              </button>
+
+              {/* Countdown - always shown at showdown */}
+              {showdownCountdown !== null && (
+                <div className="bg-blue-900/50 border border-blue-500 rounded-lg p-4 text-center">
+                  <div className="text-blue-400 text-sm mb-1">
+                    {gameState.players.filter(p => !p.isLeaving).length >= 2
+                      ? 'Next hand starting in'
+                      : 'Cleaning up in'}
+                  </div>
+                  <div className="text-4xl font-bold text-white">{showdownCountdown}s</div>
+                  {gameState.players.filter(p => !p.isLeaving).length < 2 && (
+                    <p className="text-gray-400 text-sm mt-2">Waiting for another player after cleanup...</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -267,13 +348,21 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
            gameState.currentStreet === 'pre-flop' &&
            gameState.communityCards.length === 0 &&
            gameState.activePlayerPosition === null && (
-            <button
-              onClick={startHand}
-              disabled={gameState.players.length < 2}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg mb-4 w-full"
-            >
-              Start Hand
-            </button>
+            <>
+              {gameState.players.length === 1 && (
+                <div className="bg-yellow-900/50 border border-yellow-500 rounded-lg p-4 mb-4 text-center">
+                  <p className="text-yellow-400 font-bold">⏳ Waiting for another player to join...</p>
+                  <p className="text-gray-300 text-sm mt-2">You need at least 2 players to start the game.</p>
+                </div>
+              )}
+              <button
+                onClick={startHand}
+                disabled={gameState.players.length < 2}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg mb-4 w-full"
+              >
+                {gameState.handNumber === 0 ? 'Start Game' : 'Start Hand'}
+              </button>
+            </>
           )}
 
           {/* Player's turn - show action buttons */}

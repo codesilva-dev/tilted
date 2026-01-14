@@ -22,6 +22,7 @@ export type HandEvent =
   | { type: 'action-processed'; table: TableState; action: GameAction }
   | { type: 'street-changed'; table: TableState; street: Street }
   | { type: 'hand-completed'; table: TableState; result: HandResult }
+  | { type: 'players-removed'; table: TableState; removedPlayers: Array<{ id: string; name: string }> }
   | { type: 'error'; error: Error };
 
 export type EventCallback = (event: HandEvent) => void;
@@ -46,6 +47,59 @@ export class HandController {
   }
 
   /**
+   * Mark a player as leaving (they'll be removed at the end of the hand)
+   */
+  markPlayerAsLeaving(playerId: string): void {
+    const player = this.state.players.find(p => p.id === playerId);
+    if (player) {
+      player.isLeaving = true;
+    }
+  }
+
+  /**
+   * Remove a player from the table
+   */
+  removePlayer(playerId: string): void {
+    this.state.players = this.state.players.filter(p => p.id !== playerId);
+  }
+
+  /**
+   * Remove all players marked as leaving
+   * Returns the removed player info (id and name) for cleanup
+   */
+  removeLeavingPlayers(): Array<{ id: string; name: string }> {
+    const leavingPlayers = this.state.players.filter(p => p.isLeaving);
+    const leavingPlayerInfo = leavingPlayers.map(p => ({ id: p.id, name: p.name }));
+    this.state.players = this.state.players.filter(p => !p.isLeaving);
+    return leavingPlayerInfo;
+  }
+
+  /**
+   * Reset the table to a waiting state (between hands)
+   * Called when there aren't enough players to start a new hand
+   */
+  resetToWaiting(): void {
+    this.state = {
+      ...this.state,
+      currentStreet: 'pre-flop',
+      pot: 0,
+      currentBet: 0,
+      communityCards: [],
+      activePlayerPosition: null,
+      players: this.state.players.map(p => ({
+        ...p,
+        holeCards: [],
+        currentBet: 0,
+        totalBetInHand: 0,
+        hasActed: false,
+        status: 'waiting' as const,
+        isWinner: false,
+        isLeaving: false
+      }))
+    };
+  }
+
+  /**
    * Register an event listener
    */
   on(callback: EventCallback): void {
@@ -63,23 +117,37 @@ export class HandController {
 
   /**
    * Start a new hand
-   * 1. Reset player bets and states
-   * 2. Advance dealer button
-   * 3. Shuffle and create new deck
-   * 4. Post blinds
-   * 5. Deal hole cards
+   * 1. Remove leaving players
+   * 2. Check minimum players
+   * 3. Reset player bets and states
+   * 4. Advance dealer button
+   * 5. Shuffle and create new deck
+   * 6. Post blinds
+   * 7. Deal hole cards
    */
   async startHand(): Promise<TableState> {
     try {
-      // 1. Reset player states for new hand
+      // 1. Remove players who were waiting to leave
+      const leavingPlayers = this.removeLeavingPlayers();
+      if (leavingPlayers.length > 0) {
+        console.log(`[HandController] Removed ${leavingPlayers.length} leaving players before starting new hand`);
+        this.emit({ type: 'players-removed', table: this.state, removedPlayers: leavingPlayers });
+      }
+
+      // 2. Check if we have enough players
+      if (this.state.players.length < 2) {
+        throw new Error('Need at least 2 players to start a hand');
+      }
+
+      // 3. Reset player states for new hand
       this.state = this.resetForNewHand(this.state);
 
       this.emit({ type: 'hand-started', table: this.state });
 
-      // 2. Advance dealer button (find next occupied seat)
+      // 4. Advance dealer button (find next occupied seat)
       this.state = this.advanceDealerButton(this.state);
 
-      // 3. Shuffle and reset deck
+      // 5. Shuffle and reset deck
       this.state = {
         ...this.state,
         deck: shuffleDeck(createDeck()),
@@ -87,14 +155,14 @@ export class HandController {
         currentStreet: 'pre-flop'
       };
 
-      // 4. Post blinds
+      // 6. Post blinds
       this.state = postBlinds(this.state);
       this.emit({ type: 'blinds-posted', table: this.state });
 
-      // 5. Deal hole cards
+      // 7. Deal hole cards
       this.state = dealHoleCards(this.state);
 
-      // 6. Set first active player (after big blind)
+      // 8. Set first active player (after big blind)
       this.state = this.setFirstActivePlayer(this.state);
 
       this.emit({ type: 'cards-dealt', table: this.state });
@@ -102,7 +170,11 @@ export class HandController {
       return this.getState();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.emit({ type: 'error', error: err });
+      // Don't emit error event for "not enough players" - it's expected when players leave
+      // The server will handle this gracefully by resetting to waiting state
+      if (!err.message.includes('at least 2 players')) {
+        this.emit({ type: 'error', error: err });
+      }
       throw err;
     }
   }
@@ -192,6 +264,7 @@ export class HandController {
    * 1. Evaluate all hands
    * 2. Calculate pots and winners
    * 3. Distribute winnings
+   * 4. Remove any players marked as leaving
    */
   private async showdown(): Promise<void> {
     // Update street to showdown

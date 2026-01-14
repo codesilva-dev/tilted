@@ -58,14 +58,14 @@ const SEAT_CONFIG: Record<number, SeatConfig> = {
 
   // Manual adjustments per seat (optional - uncomment to override)
   1: { x: 50, y: 15, offsetX: 0, offsetY: 0 },   // Top
-  2: { x: 75, y: 15, offsetX: 0, offsetY: 0 },  // Top-right
+  2: { x: 76, y: 17, offsetX: 0, offsetY: 0 },  // Top-right
   3: { x: 93, y: 42, offsetX: 0, offsetY: 0 },  // Right
   4: { x: 88, y: 75, offsetX: 0, offsetY: 0 },  // Bottom-right
-  5: { x: 60, y: 85, offsetX: 0, offsetY: 0 },  // Bottom-right-center
-  6: { x: 40, y: 85, offsetX: 0, offsetY: 0 },  // Bottom
+  5: { x: 62, y: 85, offsetX: 0, offsetY: 0 },  // Bottom-right-center
+  6: { x: 38, y: 85, offsetX: 0, offsetY: 0 },  // Bottom
   7: { x: 12, y: 75, offsetX: 0, offsetY: 0 },  // Bottom-left-center
   8: { x: 7, y: 42, offsetX: 0, offsetY: 0 },  // Bottom-left
-  9: { x: 25, y: 15, offsetX: 0, offsetY: 0 },  // Left
+  9: { x: 24, y: 17, offsetX: 0, offsetY: 0 },  // Left
 };
 
 // Convert seat config to CSS positioning
@@ -132,6 +132,9 @@ export default function PokerTable({
               <div className="text-xs font-bold truncate">
                 {player.name}
                 {isCurrentPlayer && <span className="text-cyan-400"> (YOU)</span>}
+                {player.isWinner && (
+                  <span className="ml-1 text-yellow-400">👑</span>
+                )}
               </div>
               <div className="flex gap-1">
                 {isDealer && <span className="bg-blue-600 px-1 rounded text-xs">D</span>}
@@ -158,25 +161,56 @@ export default function PokerTable({
               </span>
             </div>
 
-            {/* Show hole cards for current player */}
-            {isCurrentPlayer && player.holeCards.length > 0 && (
-              <div className="mt-2 flex gap-1">
-                {player.holeCards.map((card, i) => (
-                  <div
-                    key={i}
-                    className="bg-white text-black rounded p-1 w-8 h-11 flex flex-col items-center justify-center text-sm font-bold shadow"
-                  >
-                    <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}>
-                      {card.rank}
-                    </div>
-                    <div className="text-xs">
-                      {card.suit === 'hearts' && '♥'}
-                      {card.suit === 'diamonds' && '♦'}
-                      {card.suit === 'clubs' && '♣'}
-                      {card.suit === 'spades' && '♠'}
-                    </div>
+            {/* Show hole cards */}
+            {player.holeCards.length > 0 && (
+              <div className="mt-2">
+                <div className="flex gap-1">
+                  {isCurrentPlayer || gameState.currentStreet === 'showdown' ? (
+                    // Show actual cards for current player or at showdown
+                    player.holeCards.map((card, i) => (
+                      <div
+                        key={i}
+                        className="bg-white text-black rounded p-1 w-8 h-11 flex flex-col items-center justify-center text-sm font-bold shadow"
+                      >
+                        <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}>
+                          {card.rank}
+                        </div>
+                        <div className="text-xs">
+                          {card.suit === 'hearts' && '♥'}
+                          {card.suit === 'diamonds' && '♦'}
+                          {card.suit === 'clubs' && '♣'}
+                          {card.suit === 'spades' && '♠'}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    // Show card backs for other players
+                    player.holeCards.map((_, i) => (
+                      <div
+                        key={i}
+                        className="bg-gradient-to-br from-blue-600 to-blue-800 rounded p-1 w-8 h-11 flex items-center justify-center text-xs font-bold shadow border border-blue-400"
+                      >
+                        <div className="text-white opacity-50">🂠</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Show hand ranking at showdown */}
+                {gameState.currentStreet === 'showdown' && player.handRank && (
+                  <div className={`mt-1 text-xs font-semibold text-center ${
+                    player.isWinner ? 'text-yellow-400' : 'text-gray-400'
+                  }`}>
+                    {player.handRank.description}
                   </div>
-                ))}
+                )}
+
+                {/* Show leaving indicator at showdown */}
+                {gameState.currentStreet === 'showdown' && player.isLeaving && (
+                  <div className="mt-1 text-xs font-semibold text-center text-orange-400">
+                    ⚠️ Leaving
+                  </div>
+                )}
               </div>
             )}
           </div>
