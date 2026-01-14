@@ -4,17 +4,16 @@ import { HandController, HandEvent } from '../game/engine/hand-controller';
 import { TableState, GameAction, createInitialTableState, createPlayer } from '../game/types/game-state';
 
 /**
- * Socket.IO Server for real-time poker game communication
+ * Socket.IO Server v2 - With Seat Selection
  *
- * This server:
- * - Manages multiple game tables as separate rooms
- * - Each table has its own HandController instance
- * - Broadcasts game state changes to all players at a table
- * - Handles player actions (fold, check, call, bet, raise)
+ * New features:
+ * - Two-step process: join-room (spectate) → take-seat (play)
+ * - Visual seat selection (10 seats)
+ * - Create custom tables
+ * - Permanent quickplay table
  */
 
 // Port configuration
-// Railway and other platforms set PORT env var, use that if available
 const PORT = process.env.PORT
   ? parseInt(process.env.PORT)
   : process.env.SOCKET_PORT
@@ -23,14 +22,28 @@ const PORT = process.env.PORT
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
+// Table configuration
+interface TableConfig {
+  tableId: string;
+  name: string;
+  smallBlind: number;
+  bigBlind: number;
+  minBuyIn: number;
+  maxBuyIn: number;
+  maxSeats: number;
+  isQuickplay: boolean;
+}
+
 // Game room management
 interface GameRoom {
-  tableId: string;
-  controller: HandController  ;
-  players: Set<string>; // Player IDs in this room
+  config: TableConfig;
+  controller: HandController;
+  spectators: Map<string, { id: string; name: string }>; // Players watching but not seated
+  seatedPlayers: Set<string>; // Player IDs who are seated
 }
 
 const gameRooms = new Map<string, GameRoom>();
+const socketToPlayer = new Map<string, { playerId: string; playerName: string; tableId?: string }>();
 
 /**
  * Create HTTP server and Socket.IO instance
@@ -47,32 +60,50 @@ const io = new Server(httpServer, {
 /**
  * Get or create a game room
  */
-function getOrCreateRoom(tableId: string, smallBlind: number = 10, bigBlind: number = 20): GameRoom {
-  let room = gameRooms.get(tableId);
+function getOrCreateRoom(config: TableConfig): GameRoom {
+  let room = gameRooms.get(config.tableId);
 
   if (!room) {
-    // Create initial table state
-    const initialState = createInitialTableState(tableId, smallBlind, bigBlind);
+    const initialState = createInitialTableState(config.tableId, config.smallBlind, config.bigBlind);
     const controller = new HandController(initialState);
 
     room = {
-      tableId,
+      config,
       controller,
-      players: new Set()
+      spectators: new Map(),
+      seatedPlayers: new Set()
     };
 
-    // Wire up HandController events to Socket.IO broadcasts
-    setupControllerEventHandlers(controller, tableId);
+    setupControllerEventHandlers(controller, config.tableId);
+    gameRooms.set(config.tableId, room);
 
-    gameRooms.set(tableId, room);
-    console.log(`[Room Created] Table ${tableId} (SB: ${smallBlind}, BB: ${bigBlind})`);
+    console.log(`[Table Created] ${config.name} (${config.tableId}) - SB: ${config.smallBlind}, BB: ${config.bigBlind}`);
   }
 
   return room;
 }
 
 /**
- * Setup event handlers to broadcast HandController events to all clients in a room
+ * Create quickplay table on server start
+ */
+function createQuickplayTable() {
+  const quickplayConfig: TableConfig = {
+    tableId: 'quickplay-1',
+    name: 'Quickplay',
+    smallBlind: 10,
+    bigBlind: 20,
+    minBuyIn: 1000,
+    maxBuyIn: 5000,
+    maxSeats: 9,
+    isQuickplay: true
+  };
+
+  getOrCreateRoom(quickplayConfig);
+  console.log('[Quickplay] Permanent quickplay table created');
+}
+
+/**
+ * Setup event handlers to broadcast HandController events
  */
 function setupControllerEventHandlers(controller: HandController, tableId: string): void {
   controller.on((event: HandEvent) => {
@@ -88,7 +119,6 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
         break;
 
       case 'cards-dealt':
-        // Send full state to all players (in production, should send hole cards only to respective players)
         io.to(tableId).emit('cards-dealt', { table: event.table });
         console.log(`[Event] Cards dealt at table ${tableId}`);
         break;
@@ -128,119 +158,269 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
 }
 
 /**
+ * Get table info for lobby
+ */
+function getTableInfo(room: GameRoom) {
+  const state = room.controller.getState();
+  return {
+    tableId: room.config.tableId,
+    name: room.config.name,
+    smallBlind: room.config.smallBlind,
+    bigBlind: room.config.bigBlind,
+    minBuyIn: room.config.minBuyIn,
+    maxBuyIn: room.config.maxBuyIn,
+    maxSeats: room.config.maxSeats,
+    seatedPlayers: state.players.length,
+    spectators: room.spectators.size,
+    isQuickplay: room.config.isQuickplay,
+    status: state.players.length >= 2 ? 'active' : 'waiting'
+  };
+}
+
+/**
  * Handle client connections
  */
 io.on('connection', (socket: Socket) => {
   console.log(`[Connection] Client connected: ${socket.id}`);
 
   /**
-   * Client joins a table
-   * Payload: { tableId: string, playerId: string, playerName: string, buyIn: number }
+   * Get list of all tables (for lobby)
    */
-  socket.on('join-table', async (data: {
-    tableId: string;
-    playerId: string;
-    playerName: string;
-    buyIn: number;
-    seatPosition?: number;
-  }) => {
-    try {
-      const { tableId, playerId, playerName, buyIn, seatPosition } = data;
+  socket.on('get-tables', () => {
+    const tables = Array.from(gameRooms.values()).map(room => getTableInfo(room));
+    socket.emit('tables-list', { tables });
+  });
 
-      console.log(`[Join] Player ${playerName} (${playerId}) joining table ${tableId} with ${buyIn} chips`);
+  /**
+   * Create a new table
+   */
+  socket.on('create-table', (data: Omit<TableConfig, 'tableId' | 'isQuickplay'>) => {
+    try {
+      const tableId = `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const config: TableConfig = {
+        ...data,
+        tableId,
+        isQuickplay: false
+      };
+
+      getOrCreateRoom(config);
+
+      // Broadcast to all clients that a new table was created
+      io.emit('table-created', { table: getTableInfo(gameRooms.get(tableId)!) });
+
+      socket.emit('table-created-success', { tableId });
+      console.log(`[Table Created] ${config.name} by ${socket.id}`);
+
+    } catch (error) {
+      console.error('[Create Table Error]', error);
+      socket.emit('create-table-error', {
+        message: error instanceof Error ? error.message : 'Failed to create table'
+      });
+    }
+  });
+
+  /**
+   * Join a table as spectator
+   */
+  socket.on('join-room', (data: { tableId: string; playerId: string; playerName: string }) => {
+    try {
+      const { tableId, playerId, playerName } = data;
+
+      const room = gameRooms.get(tableId);
+      if (!room) {
+        throw new Error('Table not found');
+      }
 
       // Join Socket.IO room
       socket.join(tableId);
 
-      // Store player's table association
+      // Store player info
       socket.data.tableId = tableId;
       socket.data.playerId = playerId;
+      socket.data.playerName = playerName;
+      socketToPlayer.set(socket.id, { playerId, playerName, tableId });
 
-      // Get or create game room
-      const room = getOrCreateRoom(tableId);
-      room.players.add(playerId);
+      // Add as spectator
+      room.spectators.set(playerId, { id: playerId, name: playerName });
 
-      // Add player to game state
-      const currentState = room.controller.getState();
+      // Send current game state
+      socket.emit('game-state', { table: room.controller.getState() });
 
-      // Find available seat or use specified position
-      let seat = seatPosition;
-      if (seat === undefined) {
-        // Find first available seat
-        const occupiedSeats = currentState.players.map(p => p.seatPosition);
-        for (let i = 0; i < 10; i++) {
-          if (!occupiedSeats.includes(i)) {
-            seat = i;
-            break;
-          }
-        }
+      // Notify others
+      socket.to(tableId).emit('spectator-joined', {
+        playerId,
+        playerName,
+        spectatorCount: room.spectators.size
+      });
+
+      // Send seat availability (seats 1-9)
+      const state = room.controller.getState();
+      const occupiedSeats = state.players.map(p => p.seatPosition);
+      const availableSeats = Array.from({ length: room.config.maxSeats }, (_, i) => i + 1)
+        .filter(seat => !occupiedSeats.includes(seat));
+
+      socket.emit('seats-available', { availableSeats, occupiedSeats });
+
+      console.log(`[Join Room] ${playerName} joined ${tableId} as spectator`);
+
+    } catch (error) {
+      console.error('[Join Room Error]', error);
+      socket.emit('join-room-error', {
+        message: error instanceof Error ? error.message : 'Failed to join room'
+      });
+    }
+  });
+
+  /**
+   * Take a seat at the table
+   */
+  socket.on('take-seat', (data: { tableId: string; playerId: string; seatPosition: number; buyIn: number }) => {
+    try {
+      const { tableId, playerId, seatPosition, buyIn } = data;
+
+      const room = gameRooms.get(tableId);
+      if (!room) {
+        throw new Error('Table not found');
       }
 
-      if (seat === undefined) {
-        throw new Error('No available seats at this table');
+      const state = room.controller.getState();
+
+      // Validate buy-in
+      if (buyIn < room.config.minBuyIn || buyIn > room.config.maxBuyIn) {
+        throw new Error(`Buy-in must be between ${room.config.minBuyIn} and ${room.config.maxBuyIn}`);
+      }
+
+      // Check if seat is available
+      const occupiedSeats = state.players.map(p => p.seatPosition);
+      if (occupiedSeats.includes(seatPosition)) {
+        throw new Error('Seat is already taken');
+      }
+
+      // Check table capacity
+      if (state.players.length >= room.config.maxSeats) {
+        throw new Error('Table is full');
+      }
+
+      // Get player info from spectators
+      const spectator = room.spectators.get(playerId);
+      if (!spectator) {
+        throw new Error('Must join room before taking a seat');
       }
 
       // Create player and add to table
-      const player = createPlayer(playerId, playerName, seat, buyIn);
-      currentState.players.push(player);
+      const player = createPlayer(playerId, spectator.name, seatPosition, buyIn);
+      state.players.push(player);
 
-      // Send current game state to the joining player
-      socket.emit('game-state', { table: currentState });
+      // Move from spectator to seated
+      room.spectators.delete(playerId);
+      room.seatedPlayers.add(playerId);
 
-      // Notify other players
-      socket.to(tableId).emit('player-joined', {
+      // Broadcast updated state
+      io.to(tableId).emit('game-state', { table: state });
+      io.to(tableId).emit('player-seated', {
         playerId,
-        playerName,
-        seatPosition: seat,
-        stack: buyIn
+        playerName: spectator.name,
+        seatPosition,
+        stack: buyIn,
+        seatedCount: state.players.length
       });
 
-      console.log(`[Join] Player ${playerName} joined table ${tableId} at seat ${seat}`);
+      console.log(`[Take Seat] ${spectator.name} sat at seat ${seatPosition} on ${tableId}`);
 
     } catch (error) {
-      console.error('[Join Error]', error);
-      socket.emit('join-error', {
-        message: error instanceof Error ? error.message : 'Failed to join table'
+      console.error('[Take Seat Error]', error);
+      socket.emit('take-seat-error', {
+        message: error instanceof Error ? error.message : 'Failed to take seat'
       });
     }
   });
 
   /**
-   * Client leaves a table
+   * Leave seat (stand up but stay in room)
    */
-  socket.on('leave-table', (data: { tableId: string; playerId: string }) => {
+  socket.on('leave-seat', (data: { tableId: string; playerId: string }) => {
     try {
       const { tableId, playerId } = data;
 
-      socket.leave(tableId);
-
       const room = gameRooms.get(tableId);
-      if (room) {
-        room.players.delete(playerId);
-
-        // Remove player from game state
-        const currentState = room.controller.getState();
-        currentState.players = currentState.players.filter(p => p.id !== playerId);
-
-        // Notify others
-        socket.to(tableId).emit('player-left', { playerId });
-
-        console.log(`[Leave] Player ${playerId} left table ${tableId}`);
-
-        // Clean up empty rooms
-        if (room.players.size === 0) {
-          gameRooms.delete(tableId);
-          console.log(`[Room Deleted] Table ${tableId} (no players remaining)`);
-        }
+      if (!room) {
+        throw new Error('Table not found');
       }
 
+      const state = room.controller.getState();
+      const player = state.players.find(p => p.id === playerId);
+
+      if (!player) {
+        throw new Error('Player not seated');
+      }
+
+      // Remove from seated players
+      state.players = state.players.filter(p => p.id !== playerId);
+      room.seatedPlayers.delete(playerId);
+
+      // Add back to spectators
+      room.spectators.set(playerId, { id: playerId, name: player.name });
+
+      // Broadcast updated state
+      io.to(tableId).emit('game-state', { table: state });
+      io.to(tableId).emit('player-left-seat', {
+        playerId,
+        seatPosition: player.seatPosition,
+        seatedCount: state.players.length
+      });
+
+      console.log(`[Leave Seat] ${player.name} left seat on ${tableId}`);
+
     } catch (error) {
-      console.error('[Leave Error]', error);
+      console.error('[Leave Seat Error]', error);
+      socket.emit('leave-seat-error', {
+        message: error instanceof Error ? error.message : 'Failed to leave seat'
+      });
     }
   });
 
   /**
-   * Client starts a hand
+   * Leave room entirely
+   */
+  socket.on('leave-room', (data: { tableId: string; playerId: string }) => {
+    try {
+      const { tableId, playerId } = data;
+
+      const room = gameRooms.get(tableId);
+      if (!room) {
+        return;
+      }
+
+      // Remove from spectators
+      room.spectators.delete(playerId);
+
+      // Remove from seated players
+      const state = room.controller.getState();
+      state.players = state.players.filter(p => p.id !== playerId);
+      room.seatedPlayers.delete(playerId);
+
+      socket.leave(tableId);
+      socketToPlayer.delete(socket.id);
+
+      // Notify others
+      socket.to(tableId).emit('player-left-room', { playerId });
+
+      console.log(`[Leave Room] ${playerId} left ${tableId}`);
+
+      // Clean up non-quickplay empty rooms
+      if (!room.config.isQuickplay && room.spectators.size === 0 && room.seatedPlayers.size === 0) {
+        gameRooms.delete(tableId);
+        io.emit('table-deleted', { tableId });
+        console.log(`[Table Deleted] ${tableId} (empty)`);
+      }
+
+    } catch (error) {
+      console.error('[Leave Room Error]', error);
+    }
+  });
+
+  /**
+   * Start a hand
    */
   socket.on('start-hand', async (data: { tableId: string }) => {
     try {
@@ -263,12 +443,9 @@ io.on('connection', (socket: Socket) => {
   });
 
   /**
-   * Client takes an action (fold, check, call, bet, raise)
+   * Player action
    */
-  socket.on('player-action', async (data: {
-    tableId: string;
-    action: GameAction
-  }) => {
+  socket.on('player-action', async (data: { tableId: string; action: GameAction }) => {
     try {
       const { tableId, action } = data;
 
@@ -279,7 +456,6 @@ io.on('connection', (socket: Socket) => {
 
       console.log(`[Action] Player ${action.playerId} at table ${tableId}: ${action.type}${action.amount ? ` ${action.amount}` : ''}`);
 
-      // Process the action through the game controller
       await room.controller.handleAction(action);
 
     } catch (error) {
@@ -292,7 +468,7 @@ io.on('connection', (socket: Socket) => {
   });
 
   /**
-   * Client requests current game state
+   * Get game state
    */
   socket.on('get-game-state', (data: { tableId: string }) => {
     try {
@@ -314,32 +490,38 @@ io.on('connection', (socket: Socket) => {
   });
 
   /**
-   * Handle client disconnect
+   * Handle disconnect
    */
   socket.on('disconnect', () => {
     console.log(`[Disconnect] Client disconnected: ${socket.id}`);
 
-    // Clean up player from their table if they were in one
-    const tableId = socket.data.tableId;
-    const playerId = socket.data.playerId;
-
-    if (tableId && playerId) {
+    const playerInfo = socketToPlayer.get(socket.id);
+    if (playerInfo && playerInfo.tableId) {
+      const { playerId, tableId } = playerInfo;
       const room = gameRooms.get(tableId);
-      if (room) {
-        room.players.delete(playerId);
 
-        // Notify others
+      if (room) {
+        // Remove from spectators and seated players
+        room.spectators.delete(playerId);
+        room.seatedPlayers.delete(playerId);
+
+        const state = room.controller.getState();
+        state.players = state.players.filter(p => p.id !== playerId);
+
         socket.to(tableId).emit('player-disconnected', { playerId });
 
-        console.log(`[Disconnect] Player ${playerId} disconnected from table ${tableId}`);
+        console.log(`[Disconnect] Player ${playerId} disconnected from ${tableId}`);
 
-        // Clean up empty rooms
-        if (room.players.size === 0) {
+        // Clean up non-quickplay empty rooms
+        if (!room.config.isQuickplay && room.spectators.size === 0 && room.seatedPlayers.size === 0) {
           gameRooms.delete(tableId);
-          console.log(`[Room Deleted] Table ${tableId} (no players remaining)`);
+          io.emit('table-deleted', { tableId });
+          console.log(`[Table Deleted] ${tableId} (empty after disconnect)`);
         }
       }
     }
+
+    socketToPlayer.delete(socket.id);
   });
 });
 
@@ -347,11 +529,14 @@ io.on('connection', (socket: Socket) => {
  * Start the server
  */
 httpServer.listen(PORT, () => {
+  // Create quickplay table
+  createQuickplayTable();
+
   console.log(`
 ╔═══════════════════════════════════════════════════════╗
-║     Poker Socket.IO Server                           ║
-║     Port: ${PORT}                                      ║
-║     Client URL: ${CLIENT_URL}                         ║
+║     Poker Socket.IO Server v2                        ║
+║     Port: ${PORT.toString().padEnd(43)}║
+║     Client URL: ${CLIENT_URL.padEnd(36)}║
 ║     Status: ✅ Running                                ║
 ╚═══════════════════════════════════════════════════════╝
   `);

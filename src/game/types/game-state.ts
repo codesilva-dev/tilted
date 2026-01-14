@@ -85,7 +85,7 @@ export interface SeatInfo {
     player?: Player  // Only if occupied
 }
 
-export function getSeatsInfo(table: TableState, maxSeats: number = 10): SeatInfo[] {
+export function getSeatsInfo(table: TableState, maxSeats: number = 9): SeatInfo[] {
   const seats: SeatInfo[] = []
 
   for (let i = 0; i < maxSeats; i++) {
@@ -175,24 +175,31 @@ export function canPlayerBet(player: Player, table: TableState): boolean {
 
 export function getNextPosition(
   currentPosition: number,
-  maxSeats: number = 10
+  maxSeats: number = 9
 ): number {
-  return (currentPosition + 1) % maxSeats
+  // For 1-indexed seats (1-9), wrap around correctly
+  return (currentPosition % maxSeats) + 1
 }
 
 export function getPreviousPosition(
   currentPosition: number,
-  maxSeats: number = 10
+  maxSeats: number = 9
 ): number {
-  return (currentPosition - 1 + maxSeats) % maxSeats
+  // For 1-indexed seats (1-9), wrap around correctly
+  return ((currentPosition - 2 + maxSeats) % maxSeats) + 1
 }
 
 export function getPositionDistance(
   from: number,
   to: number,
-  maxSeats: number = 10
+  maxSeats: number = 9
 ): number {
-  return (to - from + maxSeats) % maxSeats
+  // For 1-indexed seats, calculate circular distance
+  if (to >= from) {
+    return to - from
+  } else {
+    return (maxSeats - from + 1) + to
+  }
 }
 
 export function getFirstOccupiedPosition(players: Player[]): number | null {
@@ -206,7 +213,7 @@ export function getFirstOccupiedPosition(players: Player[]): number | null {
 export function getNextOccupiedPosition(
   currentPosition: number,
   players: Player[],
-  maxSeats: number = 10
+  maxSeats: number = 9
 ): number | null {
   if (players.length === 0) return null
 
@@ -229,7 +236,7 @@ export function getNextOccupiedPosition(
 export function getPreviousOccupiedPosition(
   currentPosition: number,
   players: Player[],
-  maxSeats: number = 10
+  maxSeats: number = 9
 ): number | null {
   if (players.length === 0) return null
 

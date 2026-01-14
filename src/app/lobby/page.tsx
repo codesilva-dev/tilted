@@ -1,62 +1,115 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { getServerSession } from "next-auth/next"
-import { redirect } from "next/navigation"
+import { redirect, useRouter } from "next/navigation"
 import Link from "next/link"
-import { authOptions } from "@/pages/api/auth/[...nextauth]"
+import { io, Socket } from 'socket.io-client';
+import CreateTableModal, { TableConfig } from '@/components/poker/CreateTableModal';
 
-export default async function LobbyPage() {
-  const session = await getServerSession(authOptions)
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 
-  if (!session) {
-    redirect('/api/auth/signin')
-  }
+interface TableInfo {
+  tableId: string;
+  name: string;
+  smallBlind: number;
+  bigBlind: number;
+  minBuyIn: number;
+  maxBuyIn: number;
+  maxSeats: number;
+  seatedPlayers: number;
+  spectators: number;
+  isQuickplay: boolean;
+  status: 'active' | 'waiting';
+}
 
-  // Mock table data (will be replaced with real-time data from Socket.IO)
-  const tables = [
-    {
-      id: 'table-1',
-      name: 'Beginner Table',
-      players: 3,
-      maxPlayers: 9,
-      smallBlind: 10,
-      bigBlind: 20,
-      status: 'active' as const,
-      minBuyIn: 1000,
-      maxBuyIn: 5000
-    },
-    {
-      id: 'table-2',
-      name: 'High Stakes',
-      players: 2,
-      maxPlayers: 6,
-      smallBlind: 50,
-      bigBlind: 100,
-      status: 'waiting' as const,
-      minBuyIn: 5000,
-      maxBuyIn: 20000
-    },
-    {
-      id: 'table-3',
-      name: 'Quick Play',
-      players: 6,
-      maxPlayers: 9,
-      smallBlind: 5,
-      bigBlind: 10,
-      status: 'active' as const,
-      minBuyIn: 500,
-      maxBuyIn: 2000
-    },
-    {
-      id: 'table-4',
-      name: 'VIP Room',
-      players: 1,
-      maxPlayers: 6,
-      smallBlind: 100,
-      bigBlind: 200,
-      status: 'waiting' as const,
-      minBuyIn: 10000,
-      maxBuyIn: 50000
+export default function LobbyPage() {
+  const router = useRouter();
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [tables, setTables] = useState<TableInfo[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'active' | 'waiting' | 'quickplay'>('all');
+
+  useEffect(() => {
+    const socketInstance = io(SOCKET_URL, {
+      transports: ['websocket'],
+      reconnection: true
+    });
+
+    setSocket(socketInstance);
+
+    socketInstance.on('connect', () => {
+      console.log('[Lobby] Connected to server');
+      setIsConnected(true);
+      // Request tables list
+      socketInstance.emit('get-tables');
+    });
+
+    socketInstance.on('disconnect', () => {
+      console.log('[Lobby] Disconnected');
+      setIsConnected(false);
+    });
+
+    socketInstance.on('tables-list', (data: { tables: TableInfo[] }) => {
+      console.log('[Lobby] Received tables:', data.tables);
+      setTables(data.tables);
+    });
+
+    socketInstance.on('table-created', (data: { table: TableInfo }) => {
+      console.log('[Lobby] New table created:', data.table);
+      setTables(prev => [...prev, data.table]);
+    });
+
+    socketInstance.on('table-deleted', (data: { tableId: string }) => {
+      console.log('[Lobby] Table deleted:', data.tableId);
+      setTables(prev => prev.filter(t => t.tableId !== data.tableId));
+    });
+
+    socketInstance.on('create-table-error', (data: { message: string }) => {
+      console.error('[Lobby] Create table error:', data.message);
+      alert(`Failed to create table: ${data.message}`);
+    });
+
+    socketInstance.on('table-created-success', (data: { tableId: string }) => {
+      console.log('[Lobby] Table created successfully:', data.tableId);
+      // Navigate to the new table
+      router.push(`/game/${data.tableId}`);
+    });
+
+    // Poll for table updates every 5 seconds
+    const interval = setInterval(() => {
+      if (socketInstance.connected) {
+        socketInstance.emit('get-tables');
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+      socketInstance.disconnect();
+    };
+  }, [router]);
+
+  const handleCreateTable = (config: TableConfig) => {
+    if (socket) {
+      socket.emit('create-table', config);
     }
-  ];
+  };
+
+  const filteredTables = tables.filter(table => {
+    if (filter === 'all') return true;
+    if (filter === 'quickplay') return table.isQuickplay;
+    if (filter === 'active') return table.status === 'active';
+    if (filter === 'waiting') return table.status === 'waiting';
+    return true;
+  });
+
+  // Sort: quickplay first, then by status (active > waiting), then by name
+  const sortedTables = [...filteredTables].sort((a, b) => {
+    if (a.isQuickplay !== b.isQuickplay) return a.isQuickplay ? -1 : 1;
+    if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white">
@@ -79,9 +132,6 @@ export default async function LobbyPage() {
                 <div className="text-sm text-gray-400">Chips</div>
                 <div className="text-xl font-bold text-green-400">$10,000</div>
               </div>
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center font-bold">
-                {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
-              </div>
             </div>
           </div>
         </div>
@@ -93,41 +143,84 @@ export default async function LobbyPage() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h2 className="text-4xl font-bold mb-2">Game Lobby</h2>
-            <p className="text-xl text-gray-400">{tables.length} tables available</p>
+            <div className="flex items-center gap-4">
+              <p className="text-xl text-gray-400">{tables.length} tables available</p>
+              {isConnected ? (
+                <span className="bg-green-600 text-white px-3 py-1 rounded-full text-sm">
+                  🟢 Live
+                </span>
+              ) : (
+                <span className="bg-red-600 text-white px-3 py-1 rounded-full text-sm">
+                  🔴 Connecting...
+                </span>
+              )}
+            </div>
           </div>
-          <button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+          >
             + Create Table
           </button>
         </div>
 
         {/* Filters */}
         <div className="bg-gray-800 rounded-lg p-4 mb-8 flex gap-4">
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold">
-            All Tables
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              filter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
+            }`}
+          >
+            All Tables ({tables.length})
           </button>
-          <button className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
+          <button
+            onClick={() => setFilter('quickplay')}
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              filter === 'quickplay' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
+            }`}
+          >
+            Quickplay
+          </button>
+          <button
+            onClick={() => setFilter('active')}
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              filter === 'active' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
+            }`}
+          >
             Active
           </button>
-          <button className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
+          <button
+            onClick={() => setFilter('waiting')}
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              filter === 'waiting' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'
+            }`}
+          >
             Waiting
-          </button>
-          <button className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
-            Full
           </button>
         </div>
 
         {/* Tables List */}
         <div className="space-y-4">
-          {tables.map((table) => (
+          {sortedTables.map((table) => (
             <div
-              key={table.id}
-              className="bg-gray-800 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all border border-gray-700 hover:border-gray-600"
+              key={table.tableId}
+              className={`bg-gray-800 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all border ${
+                table.isQuickplay
+                  ? 'border-yellow-500 ring-2 ring-yellow-500/50'
+                  : 'border-gray-700 hover:border-gray-600'
+              }`}
             >
               <div className="flex items-center justify-between">
                 {/* Table Info */}
                 <div className="flex-1">
                   <div className="flex items-center gap-4 mb-3">
                     <h3 className="text-2xl font-bold">{table.name}</h3>
+                    {table.isQuickplay && (
+                      <span className="bg-yellow-600 text-white px-3 py-1 rounded-full text-sm font-semibold">
+                        ⚡ QUICKPLAY
+                      </span>
+                    )}
                     <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
                       table.status === 'active'
                         ? 'bg-green-600 text-white'
@@ -137,11 +230,17 @@ export default async function LobbyPage() {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                     <div>
-                      <div className="text-gray-400">Players</div>
+                      <div className="text-gray-400">Seated</div>
                       <div className="text-lg font-bold">
-                        {table.players}/{table.maxPlayers}
+                        {table.seatedPlayers}/{table.maxSeats}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400">Spectators</div>
+                      <div className="text-lg font-bold">
+                        {table.spectators}
                       </div>
                     </div>
                     <div>
@@ -167,9 +266,9 @@ export default async function LobbyPage() {
 
                 {/* Join Button */}
                 <div className="ml-8">
-                  {table.players < table.maxPlayers ? (
+                  {table.seatedPlayers < table.maxSeats || table.spectators >= 0 ? (
                     <Link
-                      href={`/game/${table.id}`}
+                      href={`/game/${table.tableId}`}
                       className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition-colors inline-block"
                     >
                       Join Table
@@ -179,7 +278,7 @@ export default async function LobbyPage() {
                       disabled
                       className="bg-gray-600 text-gray-400 font-bold py-3 px-8 rounded-lg cursor-not-allowed"
                     >
-                      Table Full
+                      Full
                     </button>
                   )}
                 </div>
@@ -188,18 +287,62 @@ export default async function LobbyPage() {
           ))}
         </div>
 
-        {/* Empty State (hidden when tables exist) */}
-        {tables.length === 0 && (
+        {/* Empty State */}
+        {sortedTables.length === 0 && (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">🎲</div>
             <h3 className="text-2xl font-bold mb-2">No tables available</h3>
-            <p className="text-gray-400 mb-6">Be the first to create a table!</p>
-            <button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
-              + Create Table
-            </button>
+            <p className="text-gray-400 mb-6">
+              {filter === 'all'
+                ? 'Be the first to create a table!'
+                : `No ${filter} tables found. Try a different filter.`}
+            </p>
+            {filter === 'all' && (
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+              >
+                + Create Table
+              </button>
+            )}
           </div>
         )}
+
+        {/* Dev Test Tables */}
+        <div className="mt-12 bg-gray-800/50 border border-gray-700 rounded-xl p-6">
+          <h3 className="text-lg font-bold mb-4 text-gray-400">Developer Test Tables (Old System)</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <Link
+              href="/game/test-table-1"
+              className="bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg text-center text-sm transition-colors"
+            >
+              Test Table 1
+            </Link>
+            <Link
+              href="/game/test-table-2"
+              className="bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg text-center text-sm transition-colors"
+            >
+              Test Table 2
+            </Link>
+            <Link
+              href="/game/test-table-3"
+              className="bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg text-center text-sm transition-colors"
+            >
+              Test Table 3
+            </Link>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            These use the old system (auto-sit). The new tables above support seat selection.
+          </p>
+        </div>
       </div>
+
+      {/* Create Table Modal */}
+      <CreateTableModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreate={handleCreateTable}
+      />
     </main>
-  )
+  );
 }
