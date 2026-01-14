@@ -60,7 +60,6 @@ export default function CreateTableModal({ isOpen, onClose, onCreate }: CreateTa
     setBigBlind(20);
     setMinBuyIn(1000);
     setMaxBuyIn(5000);
-    setMaxSeats(9);
 
     onClose();
   };
