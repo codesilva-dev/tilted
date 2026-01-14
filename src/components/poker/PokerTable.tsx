@@ -129,9 +129,9 @@ export default function PokerTable({
             `}
           >
             <div className="flex justify-between items-start mb-1">
-              <div className="text-xs font-bold truncate">
-                {player.name}
-                {isCurrentPlayer && <span className="text-cyan-400"> (YOU)</span>}
+              <div className="text-xs font-bold">
+                <span className="truncate block max-w-[70px]">{player.name}</span>
+                {isCurrentPlayer && <span className="text-cyan-400 text-[10px]">(YOU)</span>}
                 {player.isWinner && (
                   <span className="ml-1 text-yellow-400">👑</span>
                 )}

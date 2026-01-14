@@ -377,8 +377,8 @@ io.on('connection', (socket: Socket) => {
       const playerName = player.name;
       const seatPosition = player.seatPosition;
 
-      // Check if hand is in progress
-      const handInProgress = player.holeCards.length > 0;
+      // Check if hand is in progress (but not at showdown - showdown means hand is complete)
+      const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
       if (handInProgress) {
         // Mid-hand: Fold and mark as leaving
@@ -402,6 +402,16 @@ io.on('connection', (socket: Socket) => {
         io.to(tableId).emit('game-state', { table: updatedState });
 
         console.log(`[Leave Seat] ${playerName} marked as leaving, will be removed after hand`);
+
+      } else if (state.currentStreet === 'showdown') {
+        // At showdown: Mark as leaving, will be removed when next hand starts
+        console.log(`[Leave Seat] ${playerName} leaving during showdown - marking as leaving`);
+        room.controller.markPlayerAsLeaving(playerId);
+
+        const updatedState = room.controller.getState();
+        io.to(tableId).emit('game-state', { table: updatedState });
+
+        console.log(`[Leave Seat] ${playerName} marked as leaving, will be removed when countdown ends`);
 
       } else {
         // No hand in progress: Remove immediately
@@ -518,6 +528,17 @@ io.on('connection', (socket: Socket) => {
         throw new Error('Table not found');
       }
 
+      // Check if a hand is already in progress (prevent duplicate startHand calls)
+      const currentState = room.controller.getState();
+      const isActiveStreet = currentState.currentStreet !== 'showdown' && currentState.currentStreet !== 'pre-flop';
+      const isPreflopWithAction = currentState.currentStreet === 'pre-flop' && currentState.activePlayerPosition !== null;
+      const handInProgress = isActiveStreet || isPreflopWithAction;
+
+      if (handInProgress) {
+        console.log(`[Start Hand] Hand already in progress at table ${tableId}, ignoring duplicate call`);
+        return;
+      }
+
       // First, cleanup any leaving players
       const leavingPlayers = room.controller.removeLeavingPlayers();
       if (leavingPlayers.length > 0) {
@@ -531,12 +552,13 @@ io.on('connection', (socket: Socket) => {
       }
 
       // Check if we have enough players to start
+      // Note: players with small stacks (< BB) can still play - they'll go all-in on the blind
       const state = room.controller.getState();
-      const activePlayers = state.players.filter(p => !p.isLeaving);
+      const activePlayers = state.players.filter(p => !p.isLeaving && p.stack > 0);
 
       if (activePlayers.length < 2) {
         // Not enough players - just reset to waiting state, don't try to start
-        console.log(`[Start Hand] Not enough players (${activePlayers.length}) - resetting to waiting`);
+        console.log(`[Start Hand] Not enough active players with chips (${activePlayers.length}) - resetting to waiting`);
         room.controller.resetToWaiting();
         const updatedState = room.controller.getState();
         io.to(tableId).emit('game-state', { table: updatedState });
@@ -550,7 +572,21 @@ io.on('connection', (socket: Socket) => {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to start hand';
       console.error('[Start Hand Error]', errorMessage);
-      socket.emit('action-error', { message: errorMessage });
+
+      // If error is about not enough players, reset to waiting state
+      const isPlayerCountError = errorMessage.includes('at least 2') && errorMessage.includes('players');
+      if (isPlayerCountError) {
+        const { tableId } = data;
+        const room = gameRooms.get(tableId);
+        if (room) {
+          room.controller.resetToWaiting();
+          const updatedState = room.controller.getState();
+          io.to(tableId).emit('game-state', { table: updatedState });
+          console.log(`[Start Hand] Table ${tableId} reset to waiting state (not enough players)`);
+        }
+      } else {
+        socket.emit('action-error', { message: errorMessage });
+      }
     }
   });
 

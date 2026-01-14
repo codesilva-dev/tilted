@@ -170,9 +170,10 @@ export class HandController {
       return this.getState();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      // Don't emit error event for "not enough players" - it's expected when players leave
+      // Don't emit error event for "not enough players" - it's expected when players leave or bust
       // The server will handle this gracefully by resetting to waiting state
-      if (!err.message.includes('at least 2 players')) {
+      const isPlayerCountError = err.message.includes('at least 2') && err.message.includes('players');
+      if (!isPlayerCountError) {
         this.emit({ type: 'error', error: err });
       }
       throw err;

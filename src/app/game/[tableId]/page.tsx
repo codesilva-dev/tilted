@@ -43,6 +43,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   const [playerName, setPlayerName] = useState<string>('Player');
   const [isClient, setIsClient] = useState(false);
   const [isLeavingSeat, setIsLeavingSeat] = useState(false);
+  const [raiseAmount, setRaiseAmount] = useState<number>(0);
 
   useEffect(() => {
     setPlayerId(getOrCreatePlayerId());
@@ -94,6 +95,18 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     onTimeout: handleTimeout,
     timeLimit: 30
   });
+
+  // Calculate betting constraints
+  // For raise: amount is the NEW TOTAL BET, so max is stack + currentBet
+  const minRaise = gameState?.currentBet === 0 ? (gameState?.bigBlind || 20) : (gameState?.currentBet || 0) * 2;
+  const maxRaise = (currentPlayer?.stack || 0) + (currentPlayer?.currentBet || 0);
+
+  // Reset raise amount to minimum when it becomes player's turn
+  useEffect(() => {
+    if (isMyTurn && currentPlayer?.status === 'active') {
+      setRaiseAmount(minRaise);
+    }
+  }, [isMyTurn, currentPlayer?.status, minRaise]);
 
   // Handle standing up (leave seat)
   const handleLeaveSeat = useCallback(() => {
@@ -369,16 +382,18 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
           {isSeated && isMyTurn && currentPlayer?.status === 'active' && gameState.currentStreet !== 'showdown' && (() => {
             const amountToCall = gameState.currentBet - (currentPlayer?.currentBet || 0);
             const canCheck = amountToCall === 0;
-            const minRaise = gameState.currentBet === 0 ? 20 : gameState.currentBet * 2;
+            const isBet = gameState.currentBet === 0;
+            const effectiveMax = Math.max(minRaise, maxRaise);
 
             return (
               <div className="space-y-4">
-                <div className="flex justify-between items-center mb-2">
-                  <div className="text-yellow-400 font-bold">
+                {/* Header with turn indicator and timer */}
+                <div className="flex justify-between items-center">
+                  <div className="text-yellow-400 font-bold text-lg">
                     Your turn!
                   </div>
                   <div className={`
-                    text-2xl font-bold px-4 py-2 rounded-lg
+                    text-2xl font-bold px-4 py-2 rounded-lg min-w-[80px] text-center
                     ${timeRemaining > 15 ? 'bg-green-600 text-white' :
                       timeRemaining > 5 ? 'bg-yellow-600 text-white' :
                       'bg-red-600 text-white animate-pulse'}
@@ -388,7 +403,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                 </div>
 
                 {/* Timer progress bar */}
-                <div className="w-full bg-gray-700 rounded-full h-2 mb-2">
+                <div className="w-full bg-gray-700 rounded-full h-2">
                   <div
                     className={`h-2 rounded-full transition-all duration-1000 ${
                       timeRemaining > 15 ? 'bg-green-500' :
@@ -399,10 +414,11 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                {/* Main action buttons - uniform size */}
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     onClick={() => takeAction({ type: 'fold', playerId })}
-                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg"
+                    className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
                     Fold
                   </button>
@@ -410,42 +426,89 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                   {canCheck ? (
                     <button
                       onClick={() => takeAction({ type: 'check', playerId })}
-                      className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg"
+                      className="bg-gray-600 hover:bg-gray-500 active:bg-gray-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl"
                     >
                       Check
                     </button>
                   ) : (
                     <button
                       onClick={() => takeAction({ type: 'call', playerId })}
-                      className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg"
+                      className="bg-green-600 hover:bg-green-500 active:bg-green-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl flex flex-col items-center"
                     >
-                      Call ${amountToCall}
+                      <span>Call</span>
+                      <span className="text-sm opacity-90">${amountToCall}</span>
                     </button>
                   )}
 
                   <button
                     onClick={() => {
-                      const promptText = gameState.currentBet === 0
-                        ? `Enter bet amount (min $${minRaise}):`
-                        : `Enter raise amount (min $${minRaise}, current bet is $${gameState.currentBet}):`;
-                      const amount = prompt(promptText);
-                      if (amount && !isNaN(+amount)) {
-                        const numAmount = +amount;
-                        if (numAmount < minRaise) {
-                          alert(`Minimum ${gameState.currentBet === 0 ? 'bet' : 'raise'} is $${minRaise}`);
-                          return;
-                        }
-                        takeAction({
-                          type: gameState.currentBet === 0 ? 'bet' : 'raise',
-                          playerId,
-                          amount: numAmount
-                        });
-                      }
+                      takeAction({
+                        type: isBet ? 'bet' : 'raise',
+                        playerId,
+                        amount: raiseAmount
+                      });
                     }}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-6 rounded-lg col-span-2"
+                    disabled={raiseAmount < minRaise || raiseAmount > maxRaise}
+                    className="bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl flex flex-col items-center"
                   >
-                    {gameState.currentBet === 0 ? 'Bet' : 'Raise'}
+                    <span>{raiseAmount >= maxRaise ? 'All In' : isBet ? 'Bet' : 'Raise'}</span>
+                    <span className="text-sm opacity-90">${raiseAmount}</span>
                   </button>
+                </div>
+
+                {/* Raise/Bet slider */}
+                <div className="bg-gray-700/50 rounded-xl p-4 space-y-3">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400">
+                      {isBet ? 'Bet Amount' : 'Raise To'}
+                    </span>
+                    <span className="text-white font-bold text-lg">${raiseAmount}</span>
+                  </div>
+
+                  {/* Slider */}
+                  <input
+                    type="range"
+                    min={minRaise}
+                    max={effectiveMax}
+                    step={gameState.bigBlind || 20}
+                    value={raiseAmount}
+                    onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                    className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-yellow-500"
+                  />
+
+                  {/* Quick amount buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setRaiseAmount(minRaise)}
+                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 rounded-lg transition-colors"
+                    >
+                      Min
+                    </button>
+                    <button
+                      onClick={() => setRaiseAmount(Math.max(minRaise, Math.min(Math.floor((gameState.pot || 0) * 0.5), effectiveMax)))}
+                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 rounded-lg transition-colors"
+                    >
+                      ½ Pot
+                    </button>
+                    <button
+                      onClick={() => setRaiseAmount(Math.max(minRaise, Math.min(gameState.pot || minRaise, effectiveMax)))}
+                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 rounded-lg transition-colors"
+                    >
+                      Pot
+                    </button>
+                    <button
+                      onClick={() => setRaiseAmount(effectiveMax)}
+                      className="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white text-sm py-2 rounded-lg transition-colors font-bold"
+                    >
+                      All In
+                    </button>
+                  </div>
+
+                  {/* Min/Max labels */}
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Min: ${minRaise}</span>
+                    <span>Max (All In): ${maxRaise}</span>
+                  </div>
                 </div>
               </div>
             );
