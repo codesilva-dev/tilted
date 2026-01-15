@@ -214,30 +214,28 @@ export default function PokerTable({
               </div>
             )}
           </div>
-        ) : isAvailable && isSpectator ? (
-          // Empty seat - available
-          <button
-            onClick={() => handleSeatClick(seatPosition)}
-            className="bg-gray-700 hover:bg-gray-600 border-2 border-dashed border-gray-500 rounded-lg p-3 w-32 shadow-lg transition-colors cursor-pointer"
-          >
-            <div className="text-sm text-gray-400 text-center">
-              Seat {seatPosition}
+        ) : isSpectator ? (
+          // Empty seat - show only to spectators
+          isAvailable ? (
+            <button
+              onClick={() => handleSeatClick(seatPosition)}
+              className="bg-gray-700/80 hover:bg-gray-600 border-2 border-dashed border-gray-500 rounded-lg p-3 w-32 shadow-lg transition-colors cursor-pointer"
+            >
+              <div className="text-sm text-gray-400 text-center">
+                Seat {seatPosition}
+              </div>
+              <div className="text-xs text-green-400 text-center mt-1">
+                Click to Sit
+              </div>
+            </button>
+          ) : (
+            <div className="bg-gray-900/50 border border-gray-700 rounded-lg p-3 w-32 shadow-lg opacity-50">
+              <div className="text-sm text-gray-600 text-center">
+                Seat {seatPosition}
+              </div>
             </div>
-            <div className="text-xs text-green-400 text-center mt-1">
-              Click to Sit
-            </div>
-          </button>
-        ) : (
-          // Empty seat - not available (table full or not spectator)
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 w-32 shadow-lg opacity-50">
-            <div className="text-sm text-gray-600 text-center">
-              Seat {seatPosition}
-            </div>
-            <div className="text-xs text-gray-600 text-center mt-1">
-              Empty
-            </div>
-          </div>
-        )}
+          )
+        ) : null /* Hide empty seats when player is seated */}
       </div>
     );
   };

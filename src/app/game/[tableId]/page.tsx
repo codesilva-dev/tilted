@@ -3,6 +3,7 @@
 import { use, useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { useGameSocketV2 } from './use-game-socket';
 import { useActionTimer } from './use-action-timer';
 import PokerTable from '@/components/poker/PokerTable';
@@ -19,17 +20,30 @@ function getOrCreatePlayerId(): string {
   return playerId;
 }
 
-// Generate random player name
-function getOrCreatePlayerName(): string {
+// Generate random fallback player name
+function generateRandomName(): string {
+  const adjectives = ['Lucky', 'Bold', 'Clever', 'Sharp', 'Cool', 'Wild', 'Smooth', 'Quick'];
+  const nouns = ['Shark', 'Ace', 'King', 'Joker', 'Maverick', 'Bluffer', 'Pro', 'Dealer'];
+  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  return `${adj} ${noun}`;
+}
+
+// Get player name - prefer auth name, fallback to random
+function getOrCreatePlayerName(authName?: string | null): string {
   if (typeof window === 'undefined') return 'Player';
+
+  // If we have an auth name, extract first name and use it
+  if (authName) {
+    const firstName = authName.split(' ')[0];
+    return firstName;
+  }
+
+  // Fallback to cached random name
   const key = 'poker-player-name';
   let playerName = sessionStorage.getItem(key);
   if (!playerName) {
-    const adjectives = ['Lucky', 'Bold', 'Clever', 'Sharp', 'Cool', 'Wild', 'Smooth', 'Quick'];
-    const nouns = ['Shark', 'Ace', 'King', 'Joker', 'Maverick', 'Bluffer', 'Pro', 'Dealer'];
-    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    playerName = `${adj} ${noun}`;
+    playerName = generateRandomName();
     sessionStorage.setItem(key, playerName);
   }
   return playerName;
@@ -38,6 +52,7 @@ function getOrCreatePlayerName(): string {
 export default function GamePage({ params }: { params: Promise<{ tableId: string }> }) {
   const { tableId } = use(params);
   const router = useRouter();
+  const { data: session } = useSession();
 
   const [playerId, setPlayerId] = useState<string>('temp-id');
   const [playerName, setPlayerName] = useState<string>('Player');
@@ -45,11 +60,31 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   const [isLeavingSeat, setIsLeavingSeat] = useState(false);
   const [raiseAmount, setRaiseAmount] = useState<number>(0);
 
+  // Game log for live feed
+  interface GameLogEntry {
+    id: string;
+    type: 'action' | 'street' | 'winner' | 'system';
+    message: string;
+    timestamp: Date;
+  }
+  const [gameLog, setGameLog] = useState<GameLogEntry[]>([]);
+  const gameLogRef = useRef<HTMLDivElement>(null);
+
+  const addLogEntry = useCallback((type: GameLogEntry['type'], message: string) => {
+    setGameLog(prev => [...prev.slice(-50), { // Keep last 50 entries
+      id: crypto.randomUUID(),
+      type,
+      message,
+      timestamp: new Date()
+    }]);
+  }, []);
+
+  // Get player name from auth session (first name) or fallback to random
   useEffect(() => {
     setPlayerId(getOrCreatePlayerId());
-    setPlayerName(getOrCreatePlayerName());
+    setPlayerName(getOrCreatePlayerName(session?.user?.name));
     setIsClient(true);
-  }, []);
+  }, [session?.user?.name]);
 
   const {
     gameState,
@@ -72,6 +107,38 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   const currentPlayer = gameState?.players.find(p => p.id === playerId);
   const activePlayer = gameState?.players.find(p => p.seatPosition === gameState.activePlayerPosition);
   const isMyTurn = activePlayer?.id === playerId;
+
+  // Wrapper for takeAction that also logs the action
+  type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all-in';
+  const takeActionWithLog = useCallback((action: { type: ActionType; playerId: string; amount?: number }) => {
+    const player = gameState?.players.find(p => p.id === action.playerId);
+    const name = player?.name || 'Player';
+
+    let logMessage = '';
+    switch (action.type) {
+      case 'fold':
+        logMessage = `${name} folds`;
+        break;
+      case 'check':
+        logMessage = `${name} checks`;
+        break;
+      case 'call':
+        logMessage = `${name} calls`;
+        break;
+      case 'bet':
+        logMessage = `${name} bets $${action.amount}`;
+        break;
+      case 'raise':
+        logMessage = `${name} raises to $${action.amount}`;
+        break;
+    }
+
+    if (logMessage) {
+      addLogEntry('action', logMessage);
+    }
+
+    takeAction(action);
+  }, [gameState?.players, takeAction, addLogEntry]);
 
   // Auto-action when timer runs out
   const handleTimeout = useCallback(() => {
@@ -127,6 +194,50 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     leaveRoom();
     router.push('/lobby');
   }, [leaveRoom, router]);
+
+  // Track game state changes for the log
+  const prevStreetRef = useRef<string | null>(null);
+  const prevActivePlayerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!gameState) return;
+
+    // Track street changes
+    if (prevStreetRef.current && prevStreetRef.current !== gameState.currentStreet) {
+      if (gameState.currentStreet === 'flop') {
+        addLogEntry('street', '--- Flop dealt ---');
+      } else if (gameState.currentStreet === 'turn') {
+        addLogEntry('street', '--- Turn dealt ---');
+      } else if (gameState.currentStreet === 'river') {
+        addLogEntry('street', '--- River dealt ---');
+      } else if (gameState.currentStreet === 'showdown') {
+        addLogEntry('street', '--- Showdown ---');
+        // Log winners
+        gameState.players.filter(p => p.isWinner).forEach(winner => {
+          const hand = winner.handRank?.description || '';
+          addLogEntry('winner', `🏆 ${winner.name} wins! ${hand}`);
+        });
+      }
+    }
+    prevStreetRef.current = gameState.currentStreet;
+
+    // Track when action changes to a new player
+    if (gameState.activePlayerPosition !== null &&
+        prevActivePlayerRef.current !== gameState.activePlayerPosition) {
+      const activePlayer = gameState.players.find(p => p.seatPosition === gameState.activePlayerPosition);
+      if (activePlayer && prevActivePlayerRef.current !== null) {
+        // Only log if this is a player change, not initial deal
+      }
+    }
+    prevActivePlayerRef.current = gameState.activePlayerPosition;
+  }, [gameState, addLogEntry]);
+
+  // Auto-scroll game log
+  useEffect(() => {
+    if (gameLogRef.current) {
+      gameLogRef.current.scrollTop = gameLogRef.current.scrollHeight;
+    }
+  }, [gameLog]);
 
   // Auto-advance after showdown (10 second countdown)
   // Only non-leaving players run the countdown to avoid duplicate startHand calls
@@ -296,244 +407,226 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
           />
         </div>
 
-        {/* Actions Panel */}
-        <div className="bg-gray-800 rounded-lg p-6">
-          <h2 className="text-xl font-bold mb-4">Actions</h2>
-
-          {/* Not seated - show info */}
-          {!isSeated && (
-            <div className="text-gray-400 text-center py-4">
-              Take a seat to start playing!
+        {/* Bottom Panel - Game Log + Actions */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Game Log - Left Side */}
+          <div className="lg:col-span-1 bg-gray-800/80 backdrop-blur rounded-xl border border-gray-700/50 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-700/50 flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+              <h3 className="text-sm font-semibold text-gray-300">Live Feed</h3>
             </div>
-          )}
-
-          {/* Seated but waiting for players */}
-          {isSeated && gameState.players.length < 2 && (
-            <div className="text-gray-400 mb-4">
-              Waiting for more players to join...
-            </div>
-          )}
-
-          {/* Hand completed - show countdown */}
-          {isSeated && gameState.currentStreet === 'showdown' && (
-            <div className="space-y-4">
-              <div className="bg-green-900/50 border border-green-500 rounded-lg p-4 mb-4">
-                <h3 className="text-green-400 font-bold text-xl mb-3">🎉 Hand Complete!</h3>
-
-                {/* Show winners */}
-                {gameState.players
-                  .filter(p => p.isWinner)
-                  .map(player => (
-                    <div key={player.id} className="text-lg mb-2">
-                      <span className="text-yellow-400">👑 </span>
-                      <span className="font-bold text-white">{player.name}</span>
-                      <span className="text-green-400"> wins!</span>
-                      {player.handRank && (
-                        <span className="ml-2 text-sm text-gray-300">
-                          ({player.handRank.description})
-                        </span>
-                      )}
-                    </div>
-                  ))}
-
-                <p className="text-gray-300 text-sm mt-3">Check the table to see all hands and updated stacks.</p>
-              </div>
-
-              {/* Countdown - always shown at showdown */}
-              {showdownCountdown !== null && (
-                <div className="bg-blue-900/50 border border-blue-500 rounded-lg p-4 text-center">
-                  <div className="text-blue-400 text-sm mb-1">
-                    {gameState.players.filter(p => !p.isLeaving).length >= 2
-                      ? 'Next hand starting in'
-                      : 'Cleaning up in'}
-                  </div>
-                  <div className="text-4xl font-bold text-white">{showdownCountdown}s</div>
-                  {gameState.players.filter(p => !p.isLeaving).length < 2 && (
-                    <p className="text-gray-400 text-sm mt-2">Waiting for another player after cleanup...</p>
-                  )}
+            <div
+              ref={gameLogRef}
+              className="h-48 lg:h-64 overflow-y-auto p-3 space-y-1 text-sm scrollbar-thin scrollbar-thumb-gray-600"
+            >
+              {gameLog.length === 0 ? (
+                <div className="text-gray-500 text-center py-8">
+                  Game events will appear here...
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Initial state - start first hand */}
-          {isSeated &&
-           gameState.currentStreet === 'pre-flop' &&
-           gameState.communityCards.length === 0 &&
-           gameState.activePlayerPosition === null && (
-            <>
-              {gameState.players.length === 1 && (
-                <div className="bg-yellow-900/50 border border-yellow-500 rounded-lg p-4 mb-4 text-center">
-                  <p className="text-yellow-400 font-bold">⏳ Waiting for another player to join...</p>
-                  <p className="text-gray-300 text-sm mt-2">You need at least 2 players to start the game.</p>
-                </div>
-              )}
-              <button
-                onClick={startHand}
-                disabled={gameState.players.length < 2}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg mb-4 w-full"
-              >
-                {gameState.handNumber === 0 ? 'Start Game' : 'Start Hand'}
-              </button>
-            </>
-          )}
-
-          {/* Player's turn - show action buttons */}
-          {isSeated && isMyTurn && currentPlayer?.status === 'active' && gameState.currentStreet !== 'showdown' && (() => {
-            const amountToCall = gameState.currentBet - (currentPlayer?.currentBet || 0);
-            const canCheck = amountToCall === 0;
-            const isBet = gameState.currentBet === 0;
-            const effectiveMax = Math.max(minRaise, maxRaise);
-
-            return (
-              <div className="space-y-4">
-                {/* Header with turn indicator and timer */}
-                <div className="flex justify-between items-center">
-                  <div className="text-yellow-400 font-bold text-lg">
-                    Your turn!
-                  </div>
-                  <div className={`
-                    text-2xl font-bold px-4 py-2 rounded-lg min-w-[80px] text-center
-                    ${timeRemaining > 15 ? 'bg-green-600 text-white' :
-                      timeRemaining > 5 ? 'bg-yellow-600 text-white' :
-                      'bg-red-600 text-white animate-pulse'}
-                  `}>
-                    {timeRemaining}s
-                  </div>
-                </div>
-
-                {/* Timer progress bar */}
-                <div className="w-full bg-gray-700 rounded-full h-2">
+              ) : (
+                gameLog.map(entry => (
                   <div
-                    className={`h-2 rounded-full transition-all duration-1000 ${
-                      timeRemaining > 15 ? 'bg-green-500' :
-                      timeRemaining > 5 ? 'bg-yellow-500' :
-                      'bg-red-500'
+                    key={entry.id}
+                    className={`py-1 px-2 rounded ${
+                      entry.type === 'winner' ? 'bg-yellow-900/30 text-yellow-400' :
+                      entry.type === 'street' ? 'text-blue-400 font-medium' :
+                      entry.type === 'system' ? 'text-gray-500 italic' :
+                      'text-gray-300'
                     }`}
-                    style={{ width: `${(timeRemaining / 30) * 100}%` }}
-                  />
-                </div>
-
-                {/* Main action buttons - uniform size */}
-                <div className="grid grid-cols-3 gap-3">
-                  <button
-                    onClick={() => takeAction({ type: 'fold', playerId })}
-                    className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
-                    Fold
-                  </button>
+                    {entry.message}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
 
-                  {canCheck ? (
-                    <button
-                      onClick={() => takeAction({ type: 'check', playerId })}
-                      className="bg-gray-600 hover:bg-gray-500 active:bg-gray-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl"
-                    >
-                      Check
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => takeAction({ type: 'call', playerId })}
-                      className="bg-green-600 hover:bg-green-500 active:bg-green-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl flex flex-col items-center"
-                    >
-                      <span>Call</span>
-                      <span className="text-sm opacity-90">${amountToCall}</span>
-                    </button>
+          {/* Actions Panel - Right Side */}
+          <div className="lg:col-span-2 bg-gray-800/80 backdrop-blur rounded-xl border border-gray-700/50 p-4">
+            {/* Not seated */}
+            {!isSeated && (
+              <div className="text-gray-400 text-center py-8">
+                <span className="text-2xl mb-2 block">🎯</span>
+                Take a seat to start playing!
+              </div>
+            )}
+
+            {/* Waiting for players */}
+            {isSeated && gameState.players.length < 2 && gameState.currentStreet !== 'showdown' && (
+              <div className="text-center py-6">
+                <div className="animate-pulse text-yellow-400 text-lg font-medium">
+                  ⏳ Waiting for players...
+                </div>
+                <p className="text-gray-500 text-sm mt-2">Need at least 2 players</p>
+              </div>
+            )}
+
+            {/* Showdown - compact winner display */}
+            {isSeated && gameState.currentStreet === 'showdown' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {gameState.players.filter(p => p.isWinner).map(winner => (
+                      <div key={winner.id} className="flex items-center gap-2 bg-green-900/40 px-3 py-2 rounded-lg">
+                        <span className="text-yellow-400">👑</span>
+                        <span className="font-bold text-white">{winner.name}</span>
+                        {winner.handRank && (
+                          <span className="text-xs text-gray-400">({winner.handRank.description})</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {showdownCountdown !== null && (
+                    <div className="flex items-center gap-2 text-blue-400">
+                      <span className="text-sm">Next hand in</span>
+                      <span className="text-2xl font-bold">{showdownCountdown}s</span>
+                    </div>
                   )}
+                </div>
+              </div>
+            )}
 
-                  <button
-                    onClick={() => {
-                      takeAction({
+            {/* Start hand button */}
+            {isSeated &&
+             gameState.currentStreet === 'pre-flop' &&
+             gameState.communityCards.length === 0 &&
+             gameState.activePlayerPosition === null &&
+             gameState.players.length >= 2 && (
+              <div className="text-center py-4">
+                <button
+                  onClick={startHand}
+                  className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-bold py-3 px-8 rounded-xl shadow-lg hover:shadow-xl transition-all"
+                >
+                  {gameState.handNumber === 0 ? '🎮 Start Game' : '▶️ Start Hand'}
+                </button>
+              </div>
+            )}
+
+            {/* Player's turn - compact action buttons */}
+            {isSeated && isMyTurn && currentPlayer?.status === 'active' && gameState.currentStreet !== 'showdown' && (() => {
+              const amountToCall = gameState.currentBet - (currentPlayer?.currentBet || 0);
+              const canCheck = amountToCall === 0;
+              const isBet = gameState.currentBet === 0;
+              const effectiveMax = Math.max(minRaise, maxRaise);
+
+              return (
+                <div className="space-y-3">
+                  {/* Timer bar */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 bg-gray-700 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-1000 ${
+                          timeRemaining > 15 ? 'bg-green-500' :
+                          timeRemaining > 5 ? 'bg-yellow-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${(timeRemaining / 30) * 100}%` }}
+                      />
+                    </div>
+                    <div className={`text-lg font-bold min-w-[50px] text-right ${
+                      timeRemaining > 15 ? 'text-green-400' :
+                      timeRemaining > 5 ? 'text-yellow-400' :
+                      'text-red-400 animate-pulse'
+                    }`}>
+                      {timeRemaining}s
+                    </div>
+                  </div>
+
+                  {/* Action buttons row */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => takeActionWithLog({ type: 'fold', playerId })}
+                      className="flex-1 bg-red-600/80 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-all"
+                    >
+                      Fold
+                    </button>
+
+                    {canCheck ? (
+                      <button
+                        onClick={() => takeActionWithLog({ type: 'check', playerId })}
+                        className="flex-1 bg-gray-600/80 hover:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-all"
+                      >
+                        Check
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => takeActionWithLog({ type: 'call', playerId })}
+                        className="flex-1 bg-green-600/80 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition-all"
+                      >
+                        Call ${amountToCall}
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => takeActionWithLog({
                         type: isBet ? 'bet' : 'raise',
                         playerId,
                         amount: raiseAmount
-                      });
-                    }}
-                    disabled={raiseAmount < minRaise || raiseAmount > maxRaise}
-                    className="bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-xl flex flex-col items-center"
-                  >
-                    <span>{raiseAmount >= maxRaise ? 'All In' : isBet ? 'Bet' : 'Raise'}</span>
-                    <span className="text-sm opacity-90">${raiseAmount}</span>
-                  </button>
-                </div>
-
-                {/* Raise/Bet slider */}
-                <div className="bg-gray-700/50 rounded-xl p-4 space-y-3">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-400">
-                      {isBet ? 'Bet Amount' : 'Raise To'}
-                    </span>
-                    <span className="text-white font-bold text-lg">${raiseAmount}</span>
+                      })}
+                      disabled={raiseAmount < minRaise || raiseAmount > maxRaise}
+                      className="flex-1 bg-yellow-500/90 hover:bg-yellow-500 disabled:bg-gray-600 text-black font-semibold py-3 rounded-lg transition-all"
+                    >
+                      {raiseAmount >= maxRaise ? 'All In' : isBet ? 'Bet' : 'Raise'} ${raiseAmount}
+                    </button>
                   </div>
 
-                  {/* Slider */}
-                  <input
-                    type="range"
-                    min={minRaise}
-                    max={effectiveMax}
-                    step={gameState.bigBlind || 20}
-                    value={raiseAmount}
-                    onChange={(e) => setRaiseAmount(Number(e.target.value))}
-                    className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-                  />
+                  {/* Slider row */}
+                  <div className="flex items-center gap-3 bg-gray-700/30 rounded-lg p-3">
+                    <span className="text-xs text-gray-500 w-12">${minRaise}</span>
+                    <input
+                      type="range"
+                      min={minRaise}
+                      max={effectiveMax}
+                      step={gameState.bigBlind || 20}
+                      value={raiseAmount}
+                      onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                      className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-yellow-500"
+                    />
+                    <span className="text-xs text-gray-500 w-16 text-right">${effectiveMax}</span>
+                  </div>
 
-                  {/* Quick amount buttons */}
+                  {/* Quick buttons */}
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => setRaiseAmount(minRaise)}
-                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 rounded-lg transition-colors"
-                    >
-                      Min
-                    </button>
-                    <button
-                      onClick={() => setRaiseAmount(Math.max(minRaise, Math.min(Math.floor((gameState.pot || 0) * 0.5), effectiveMax)))}
-                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 rounded-lg transition-colors"
-                    >
-                      ½ Pot
-                    </button>
-                    <button
-                      onClick={() => setRaiseAmount(Math.max(minRaise, Math.min(gameState.pot || minRaise, effectiveMax)))}
-                      className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-sm py-2 rounded-lg transition-colors"
-                    >
-                      Pot
-                    </button>
-                    <button
-                      onClick={() => setRaiseAmount(effectiveMax)}
-                      className="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white text-sm py-2 rounded-lg transition-colors font-bold"
-                    >
-                      All In
-                    </button>
-                  </div>
-
-                  {/* Min/Max labels */}
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Min: ${minRaise}</span>
-                    <span>Max (All In): ${maxRaise}</span>
+                    {[
+                      { label: 'Min', value: minRaise },
+                      { label: '½ Pot', value: Math.max(minRaise, Math.min(Math.floor((gameState.pot || 0) * 0.5), effectiveMax)) },
+                      { label: 'Pot', value: Math.max(minRaise, Math.min(gameState.pot || minRaise, effectiveMax)) },
+                      { label: 'All In', value: effectiveMax, highlight: true }
+                    ].map(btn => (
+                      <button
+                        key={btn.label}
+                        onClick={() => setRaiseAmount(btn.value)}
+                        className={`flex-1 py-2 text-xs font-medium rounded transition-all ${
+                          btn.highlight
+                            ? 'bg-yellow-600/80 hover:bg-yellow-600 text-white'
+                            : 'bg-gray-700/50 hover:bg-gray-700 text-gray-300'
+                        }`}
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
 
-          {/* Waiting for other player */}
-          {isSeated && !isMyTurn && gameState.communityCards.length > 0 && gameState.currentStreet !== 'showdown' && (
-            <div className="text-gray-400 text-center py-4">
-              <div className="flex items-center justify-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
-                <span>Waiting for {activePlayer?.name || 'other player'} to act...</span>
+            {/* Waiting for opponent */}
+            {isSeated && !isMyTurn && gameState.activePlayerPosition !== null && gameState.currentStreet !== 'showdown' && (
+              <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent"></div>
+                <span>Waiting for {activePlayer?.name || 'opponent'}...</span>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Debug Info */}
-        <div className="mt-8 text-xs text-gray-500">
-          <details>
-            <summary className="cursor-pointer hover:text-gray-300">Debug Info</summary>
-            <pre className="mt-2 bg-gray-900 p-4 rounded overflow-auto max-h-96">
-              {JSON.stringify(gameState, null, 2)}
-            </pre>
-          </details>
-        </div>
+        {/* Debug Info - collapsed */}
+        <details className="mt-4 text-xs text-gray-600">
+          <summary className="cursor-pointer hover:text-gray-400">Debug</summary>
+          <pre className="mt-2 bg-gray-900/50 p-3 rounded-lg overflow-auto max-h-48 text-[10px]">
+            {JSON.stringify(gameState, null, 2)}
+          </pre>
+        </details>
       </div>
     </div>
   );
