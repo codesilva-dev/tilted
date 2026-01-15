@@ -26,6 +26,7 @@ export type Street = | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
 
 export interface TableState {
     id: string;
+    name: string;
     players: Player[];
     dealerPosition: number;
     smallBlindPosition: number;
@@ -114,11 +115,13 @@ export interface BettingLimits {
 
 export function createInitialTableState(
   tableId: string,
+  tableName: string,
   smallBlind: number,
   bigBlind: number
 ): TableState {
   return {
     id: tableId,
+    name: tableName,
     players: [],
     dealerPosition: 0,
     smallBlindPosition: 1,

@@ -348,7 +348,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
         {/* Table Header */}
         <div className="mb-8 flex justify-between items-start">
           <div>
-            <h2 className="text-4xl font-bold mb-2">Table {tableId}</h2>
+            <h2 className="text-4xl font-bold mb-2">{gameState.name || tableId}</h2>
             <div className="flex gap-4 text-sm">
               <span className="bg-green-600 px-3 py-1 rounded">Connected</span>
               <span className="text-gray-400">
