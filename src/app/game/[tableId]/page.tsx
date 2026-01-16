@@ -320,12 +320,25 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   }
 
   if (error) {
+    const isTableNotFound = error.toLowerCase().includes('table not found');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
         <div className="text-center">
-          <div className="text-red-500 text-6xl mb-4">⚠️</div>
-          <h1 className="text-2xl font-bold mb-2">Connection Error</h1>
-          <p className="text-gray-400">{error}</p>
+          <div className="text-red-500 text-6xl mb-4">{isTableNotFound ? '🔍' : '⚠️'}</div>
+          <h1 className="text-2xl font-bold mb-2">
+            {isTableNotFound ? 'Table Not Found' : 'Connection Error'}
+          </h1>
+          <p className="text-gray-400 mb-6">
+            {isTableNotFound
+              ? 'This table no longer exists. It may have been deleted after a server restart.'
+              : error}
+          </p>
+          <Link
+            href="/lobby"
+            className="inline-block bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+          >
+            Back to Lobby
+          </Link>
         </div>
       </div>
     );

@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { createServer } from 'http';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { HandController, HandEvent } from '../game/engine/hand-controller';
 import { TableState, GameAction, createInitialTableState, createPlayer } from '../game/types/game-state';
 import { log } from '../util/log';
@@ -151,7 +151,23 @@ async function handleDisconnectTimeout(playerId: string): Promise<void> {
 /**
  * Create HTTP server and Socket.IO instance
  */
-const httpServer = createServer();
+const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // Health check endpoint for Render and other hosting platforms
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      tables: gameRooms.size,
+      uptime: process.uptime()
+    }));
+    return;
+  }
+  // Return 404 for other routes
+  res.writeHead(404);
+  res.end();
+});
+
 const io = new Server(httpServer, {
   cors: {
     origin: CLIENT_URL,
