@@ -32,6 +32,15 @@ export type EventCallback = (event: HandEvent) => void;
  * It coordinates all the game logic layers: dealing, betting, pot management, and showdown.
  */
 export class HandController {
+    /**
+     * Unmark a player as leaving (cancel their leave request)
+     */
+    unmarkPlayerAsLeaving(playerId: string): void {
+      const player = this.state.players.find(p => p.id === playerId);
+      if (player) {
+        player.isLeaving = false;
+      }
+    }
   private state: TableState;
   private eventCallbacks: EventCallback[] = [];
 

@@ -8,6 +8,8 @@ interface PokerTableProps {
   onTakeSeat: (seatPosition: number, buyIn: number) => void;
   availableSeats: number[];
   isSpectator: boolean;
+  activePlayerId?: string | null;
+  timeRemaining?: number;
 }
 
 // ============================================
@@ -85,7 +87,9 @@ export default function PokerTable({
   currentPlayerId,
   onTakeSeat,
   availableSeats,
-  isSpectator
+  isSpectator,
+  activePlayerId,
+  timeRemaining
 }: PokerTableProps) {
   const TOTAL_SEATS = 9; // Always 9 seats
 
@@ -109,7 +113,8 @@ export default function PokerTable({
     const isDealer = player && player.seatPosition === gameState.dealerPosition;
     const isSB = player && player.seatPosition === gameState.smallBlindPosition;
     const isBB = player && player.seatPosition === gameState.bigBlindPosition;
-    const isActive = player && player.seatPosition === gameState.activePlayerPosition;
+    // Use props.activePlayerId to avoid ReferenceError
+    const isActive = player && player.id === (typeof activePlayerId !== 'undefined' ? activePlayerId : null);
 
     const position = getSeatPosition(seatPosition);
 
@@ -123,7 +128,7 @@ export default function PokerTable({
           // Occupied seat
           <div
             className={`
-              bg-gray-800 rounded-lg p-3 w-32 shadow-lg
+              bg-gray-800 rounded-lg p-3 w-40 shadow-lg
               ${isActive ? 'ring-2 ring-yellow-500' : ''}
               ${isCurrentPlayer ? 'ring-2 ring-cyan-500' : ''}
             `}
@@ -165,36 +170,69 @@ export default function PokerTable({
             {player.holeCards.length > 0 && (
               <div className="mt-2">
                 <div className="flex gap-1">
-                  {isCurrentPlayer || gameState.currentStreet === 'showdown' ? (
-                    // Show actual cards for current player or at showdown
-                    player.holeCards.map((card, i) => (
-                      <div
-                        key={i}
-                        className="bg-white text-black rounded p-1 w-8 h-11 flex flex-col items-center justify-center text-sm font-bold shadow"
-                      >
-                        <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}>
-                          {card.rank}
-                        </div>
-                        <div className="text-xs">
-                          {card.suit === 'hearts' && '♥'}
-                          {card.suit === 'diamonds' && '♦'}
-                          {card.suit === 'clubs' && '♣'}
-                          {card.suit === 'spades' && '♠'}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    // Show card backs for other players
-                    player.holeCards.map((_, i) => (
-                      <div
-                        key={i}
-                        className="bg-gradient-to-br from-blue-600 to-blue-800 rounded p-1 w-8 h-11 flex items-center justify-center text-xs font-bold shadow border border-blue-400"
-                      >
-                        <div className="text-white opacity-50">🂠</div>
-                      </div>
-                    ))
-                  )}
+                  {isCurrentPlayer || gameState.currentStreet === 'showdown'
+                    ? (
+                        // Show actual cards for current player or at showdown (but not if folded)
+                        (gameState.currentStreet === 'showdown' && player.status === 'folded')
+                          ? player.holeCards.map((_, i) => (
+                              <div
+                                key={i}
+                                className="bg-gradient-to-br from-blue-600 to-blue-800 rounded p-1 w-10 h-14 flex items-center justify-center text-xs font-bold shadow border border-blue-400"
+                              >
+                                <div className="text-white opacity-50">🂠</div>
+                              </div>
+                            ))
+                          : player.holeCards.map((card, i) => (
+                              <div
+                                key={i}
+                                className="bg-white text-black rounded p-1 w-10 h-14 flex flex-col items-center justify-center font-bold shadow"
+                              >
+                                <div className={`text-lg leading-tight ${card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}`}>
+                                  {card.rank}
+                                </div>
+                                <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600 text-xl leading-none' : 'text-black text-xl leading-none'}>
+                                  {card.suit === 'hearts' && '♥'}
+                                  {card.suit === 'diamonds' && '♦'}
+                                  {card.suit === 'clubs' && '♣'}
+                                  {card.suit === 'spades' && '♠'}
+                                </div>
+                              </div>
+                            ))
+                      )
+                    : (
+                        // Hide all cards if not showdown and not current player
+                        player.holeCards.map((_, i) => (
+                          <div
+                            key={i}
+                            className="bg-gradient-to-br from-blue-600 to-blue-800 rounded p-1 w-10 h-14 flex items-center justify-center text-xs font-bold shadow border border-blue-400"
+                          >
+                            <div className="text-white opacity-50">🂠</div>
+                          </div>
+                        ))
+                      )}
                 </div>
+                {/* Timer bar for active player */}
+                {isActive && typeof timeRemaining === 'number' && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="flex-1 bg-gray-700 rounded-full h-2 w-16">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-1000 ${
+                          timeRemaining > 15 ? 'bg-green-500' :
+                          timeRemaining > 5 ? 'bg-yellow-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${(timeRemaining / 30) * 100}%` }}
+                      />
+                    </div>
+                    <div className={`text-xs font-bold min-w-[24px] text-right ${
+                      timeRemaining > 15 ? 'text-green-400' :
+                      timeRemaining > 5 ? 'text-yellow-400' :
+                      'text-red-400 animate-pulse'
+                    }`}>
+                      {timeRemaining}s
+                    </div>
+                  </div>
+                )}
 
                 {/* Show hand ranking at showdown */}
                 {gameState.currentStreet === 'showdown' && player.handRank && (
@@ -268,7 +306,7 @@ export default function PokerTable({
                   <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}>
                     {card.rank}
                   </div>
-                  <div className="text-sm mt-1">
+                  <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600 text-2xl mt-1 leading-none' : 'text-black text-2xl mt-1 leading-none'}>
                     {card.suit === 'hearts' && '♥'}
                     {card.suit === 'diamonds' && '♦'}
                     {card.suit === 'clubs' && '♣'}

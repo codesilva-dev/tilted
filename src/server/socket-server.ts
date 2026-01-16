@@ -311,6 +311,25 @@ io.on('connection', (socket: Socket) => {
         throw new Error(`Buy-in must be between ${room.config.minBuyIn} and ${room.config.maxBuyIn}`);
       }
 
+
+      // Check if player is already seated at the table
+      const existingPlayer = state.players.find(p => p.id === playerId);
+      if (existingPlayer) {
+        if (existingPlayer.isLeaving) {
+          // Player was leaving but changed their mind - cancel the leave request
+          room.controller.unmarkPlayerAsLeaving(playerId);
+          room.seatedPlayers.add(playerId);
+
+          const updatedState = room.controller.getState();
+          io.to(tableId).emit('game-state', { table: updatedState });
+
+          log(`[Take Seat] ${existingPlayer.name} canceled leave request and is staying at seat ${existingPlayer.seatPosition} on ${tableId}`);
+          return;
+        }
+        // Player is seated and not leaving - can't take another seat
+        throw new Error('You are already seated at this table');
+      }
+
       // Check if seat is available
       const occupiedSeats = state.players.map(p => p.seatPosition);
       if (occupiedSeats.includes(seatPosition)) {
@@ -690,7 +709,7 @@ io.on('connection', (socket: Socket) => {
       const room = gameRooms.get(tableId);
 
       if (room) {
-        // If player is seated and in an active hand, fold them first
+        // If player is seated and in an active hand, fold them only if it's their turn
         const state = room.controller.getState();
         const player = state.players.find(p => p.id === playerId);
 
@@ -698,11 +717,11 @@ io.on('connection', (socket: Socket) => {
           const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
           if (handInProgress) {
-            // Mid-hand: Fold and mark as leaving
-            if (player.status === 'active') {
-              log(`[Disconnect] ${player.name} disconnected mid-hand - folding`);
+            // Only fold if it's the player's turn
+            if (player.status === 'active' && state.activePlayerPosition === player.seatPosition) {
+              log(`[Disconnect] ${player.name} disconnected mid-hand - folding (it was their turn)`);
               try {
-                const foldAction: GameAction = {
+                const foldAction: import("../game/types/game-state").GameAction = {
                   type: 'fold',
                   playerId,
                   timestamp: new Date()
@@ -711,8 +730,9 @@ io.on('connection', (socket: Socket) => {
               } catch (error) {
                 console.error('[Disconnect] Error folding player hand:', error);
               }
+            } else {
+              log(`[Disconnect] ${player.name} disconnected mid-hand - not their turn, marking as leaving`);
             }
-
             // Mark player as leaving
             room.controller.markPlayerAsLeaving(playerId);
             log(`[Disconnect] ${player.name} marked as leaving, will be removed after hand`);

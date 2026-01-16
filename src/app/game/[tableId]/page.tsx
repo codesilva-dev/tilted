@@ -155,10 +155,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     }
   }, [gameState, currentPlayer, isMyTurn, takeAction, playerId]);
 
-  // Action timer - 30 seconds to act
+  // Action timer - 30 seconds to act (runs for all players to see the countdown)
   const { timeRemaining } = useActionTimer({
     isMyTurn: isMyTurn || false,
-    isActive: (currentPlayer?.status === 'active' && gameState?.currentStreet !== 'showdown') || false,
+    activePlayerPosition: gameState?.activePlayerPosition ?? null,
     onTimeout: handleTimeout,
     timeLimit: 30
   });
@@ -404,6 +404,8 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
             onTakeSeat={takeSeat}
             availableSeats={availableSeats}
             isSpectator={!isSeated}
+            activePlayerId={gameState.activePlayerPosition != null ? (gameState.players.find(p => p.seatPosition === gameState.activePlayerPosition)?.id ?? null) : null}
+            timeRemaining={timeRemaining}
           />
         </div>
 
@@ -511,27 +513,6 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
 
               return (
                 <div className="space-y-3">
-                  {/* Timer bar */}
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 bg-gray-700 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-1000 ${
-                          timeRemaining > 15 ? 'bg-green-500' :
-                          timeRemaining > 5 ? 'bg-yellow-500' :
-                          'bg-red-500'
-                        }`}
-                        style={{ width: `${(timeRemaining / 30) * 100}%` }}
-                      />
-                    </div>
-                    <div className={`text-lg font-bold min-w-[50px] text-right ${
-                      timeRemaining > 15 ? 'text-green-400' :
-                      timeRemaining > 5 ? 'text-yellow-400' :
-                      'text-red-400 animate-pulse'
-                    }`}>
-                      {timeRemaining}s
-                    </div>
-                  </div>
-
                   {/* Action buttons row */}
                   <div className="flex gap-2">
                     <button
