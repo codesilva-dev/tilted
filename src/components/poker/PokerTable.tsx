@@ -167,41 +167,42 @@ export default function PokerTable({
             </div>
 
             {/* Show hole cards */}
-            {player.holeCards.length > 0 && (
-              <div className="mt-2">
-                <div className="flex gap-1">
-                  {isCurrentPlayer || gameState.currentStreet === 'showdown'
-                    ? (
-                        // Show actual cards for current player or at showdown (but not if folded)
-                        (gameState.currentStreet === 'showdown' && player.status === 'folded')
-                          ? player.holeCards.map((_, i) => (
-                              <div
-                                key={i}
-                                className="bg-gradient-to-br from-blue-600 to-blue-800 rounded p-1 w-10 h-14 flex items-center justify-center text-xs font-bold shadow border border-blue-400"
-                              >
-                                <div className="text-white opacity-50">🂠</div>
-                              </div>
-                            ))
-                          : player.holeCards.map((card, i) => (
-                              <div
-                                key={i}
-                                className="bg-white text-black rounded p-1 w-10 h-14 flex flex-col items-center justify-center font-bold shadow"
-                              >
-                                <div className={`text-lg leading-tight ${card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}`}>
-                                  {card.rank}
-                                </div>
-                                <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600 text-xl leading-none' : 'text-black text-xl leading-none'}>
-                                  {card.suit === 'hearts' && '♥'}
-                                  {card.suit === 'diamonds' && '♦'}
-                                  {card.suit === 'clubs' && '♣'}
-                                  {card.suit === 'spades' && '♠'}
-                                </div>
-                              </div>
-                            ))
-                      )
-                    : (
-                        // Hide all cards if not showdown and not current player
-                        player.holeCards.map((_, i) => (
+            {player.holeCards.length > 0 && (() => {
+              // Check if this is a TRUE showdown (2+ non-folded players)
+              // Cards are only revealed at true showdowns, not when someone wins by fold
+              const nonFoldedPlayers = gameState.players.filter(p =>
+                p.status !== 'folded' && p.holeCards.length > 0
+              );
+              const isTrueShowdown = gameState.currentStreet === 'showdown' && nonFoldedPlayers.length >= 2;
+
+              // Determine if this player's cards should be shown
+              // - Current player always sees their own cards
+              // - At TRUE showdown: show non-folded players' cards, hide folded players' cards
+              // - Win by fold: only winner sees their own cards, no one else's cards revealed
+              const shouldShowCards = isCurrentPlayer ||
+                (isTrueShowdown && player.status !== 'folded');
+
+              return (
+                <div className="mt-2">
+                  <div className="flex gap-1">
+                    {shouldShowCards
+                      ? player.holeCards.map((card, i) => (
+                          <div
+                            key={i}
+                            className="bg-white text-black rounded p-1 w-10 h-14 flex flex-col items-center justify-center font-bold shadow"
+                          >
+                            <div className={`text-lg leading-tight ${card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-black'}`}>
+                              {card.rank}
+                            </div>
+                            <div className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600 text-xl leading-none' : 'text-black text-xl leading-none'}>
+                              {card.suit === 'hearts' && '♥'}
+                              {card.suit === 'diamonds' && '♦'}
+                              {card.suit === 'clubs' && '♣'}
+                              {card.suit === 'spades' && '♠'}
+                            </div>
+                          </div>
+                        ))
+                      : player.holeCards.map((_, i) => (
                           <div
                             key={i}
                             className="bg-gradient-to-br from-blue-600 to-blue-800 rounded p-1 w-10 h-14 flex items-center justify-center text-xs font-bold shadow border border-blue-400"
@@ -209,8 +210,8 @@ export default function PokerTable({
                             <div className="text-white opacity-50">🂠</div>
                           </div>
                         ))
-                      )}
-                </div>
+                    }
+                  </div>
                 {/* Timer bar for active player */}
                 {isActive && typeof timeRemaining === 'number' && (
                   <div className="mt-1 flex items-center gap-2">
@@ -234,8 +235,8 @@ export default function PokerTable({
                   </div>
                 )}
 
-                {/* Show hand ranking at showdown */}
-                {gameState.currentStreet === 'showdown' && player.handRank && (
+                {/* Show hand ranking at true showdown (not win by fold) */}
+                {isTrueShowdown && player.handRank && player.status !== 'folded' && (
                   <div className={`mt-1 text-xs font-semibold text-center ${
                     player.isWinner ? 'text-yellow-400' : 'text-gray-400'
                   }`}>
@@ -250,7 +251,8 @@ export default function PokerTable({
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
           </div>
         ) : isSpectator ? (
           // Empty seat - show only to spectators

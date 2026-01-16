@@ -211,12 +211,37 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
       } else if (gameState.currentStreet === 'river') {
         addLogEntry('street', '--- River dealt ---');
       } else if (gameState.currentStreet === 'showdown') {
-        addLogEntry('street', '--- Showdown ---');
-        // Log winners
-        gameState.players.filter(p => p.isWinner).forEach(winner => {
-          const hand = winner.handRank?.description || '';
-          addLogEntry('winner', `🏆 ${winner.name} wins! ${hand}`);
-        });
+        // Check if this is a TRUE showdown (2+ non-folded players)
+        const nonFoldedPlayers = gameState.players.filter(p =>
+          p.status !== 'folded' && p.holeCards.length > 0
+        );
+        const isTrueShowdown = nonFoldedPlayers.length >= 2;
+
+        if (isTrueShowdown) {
+          addLogEntry('street', '--- Showdown ---');
+          // Log all non-folded hands (sorted by winner first)
+          nonFoldedPlayers
+            .sort((a, b) => (b.isWinner ? 1 : 0) - (a.isWinner ? 1 : 0))
+            .forEach(player => {
+              const cards = player.holeCards.map(c =>
+                `${c.rank}${c.suit === 'hearts' ? '♥' : c.suit === 'diamonds' ? '♦' : c.suit === 'clubs' ? '♣' : '♠'}`
+              ).join(' ');
+              const hand = player.handRank?.description || '';
+              const value = player.handRank?.value || 0;
+
+              if (player.isWinner) {
+                addLogEntry('winner', `👑 ${player.name}: ${cards} - ${hand} [${value}]`);
+              } else {
+                addLogEntry('action', `   ${player.name}: ${cards} - ${hand} [${value}]`);
+              }
+            });
+        } else {
+          // Win by fold - just show winner, no cards
+          const winners = gameState.players.filter(p => p.isWinner);
+          winners.forEach(winner => {
+            addLogEntry('winner', `👑 ${winner.name} wins by fold!`);
+          });
+        }
       }
     }
     prevStreetRef.current = gameState.currentStreet;
@@ -463,30 +488,162 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
               </div>
             )}
 
-            {/* Showdown - compact winner display */}
-            {isSeated && gameState.currentStreet === 'showdown' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {gameState.players.filter(p => p.isWinner).map(winner => (
-                      <div key={winner.id} className="flex items-center gap-2 bg-green-900/40 px-3 py-2 rounded-lg">
-                        <span className="text-yellow-400">👑</span>
-                        <span className="font-bold text-white">{winner.name}</span>
-                        {winner.handRank && (
-                          <span className="text-xs text-gray-400">({winner.handRank.description})</span>
-                        )}
+            {/* Hand complete - show different UI for true showdown vs win by fold */}
+            {isSeated && gameState.currentStreet === 'showdown' && (() => {
+              // Check if this is a TRUE showdown (2+ non-folded players)
+              const nonFoldedPlayers = gameState.players.filter(p =>
+                p.status !== 'folded' && p.holeCards.length > 0
+              );
+              const isTrueShowdown = nonFoldedPlayers.length >= 2;
+              const winners = gameState.players.filter(p => p.isWinner);
+
+              if (!isTrueShowdown) {
+                // Win by fold - simple display, no cards revealed
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {winners.map(winner => (
+                          <div key={winner.id} className="flex items-center gap-2 bg-green-900/40 px-4 py-3 rounded-lg border border-green-600/50">
+                            <span className="text-yellow-400 text-xl">👑</span>
+                            <span className="font-bold text-white text-lg">{winner.name}</span>
+                            <span className="text-green-400">wins by fold!</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                  {showdownCountdown !== null && (
-                    <div className="flex items-center gap-2 text-blue-400">
-                      <span className="text-sm">Next hand in</span>
-                      <span className="text-2xl font-bold">{showdownCountdown}s</span>
+                      {showdownCountdown !== null && (
+                        <div className="flex items-center gap-2 text-blue-400">
+                          <span className="text-sm">Next hand in</span>
+                          <span className="text-2xl font-bold">{showdownCountdown}s</span>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
+                );
+              }
+
+              // True showdown - detailed hand results
+              return (
+                <div className="space-y-3">
+                  {/* Header with countdown */}
+                  <div className="flex items-center justify-between border-b border-gray-700 pb-2">
+                    <h3 className="text-lg font-bold text-white">Showdown Results</h3>
+                    {showdownCountdown !== null && (
+                      <div className="flex items-center gap-2 text-blue-400">
+                        <span className="text-sm">Next hand in</span>
+                        <span className="text-2xl font-bold">{showdownCountdown}s</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* All players' hands - only show non-folded players' cards */}
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {gameState.players
+                      .filter(p => p.holeCards.length > 0)
+                      .sort((a, b) => (b.isWinner ? 1 : 0) - (a.isWinner ? 1 : 0))
+                      .map(player => {
+                        const isWinner = player.isWinner;
+                        const isFolded = player.status === 'folded';
+                        const showCards = !isFolded; // Only show cards for non-folded players
+
+                        return (
+                          <div
+                            key={player.id}
+                            className={`flex items-center justify-between p-2 rounded-lg ${
+                              isWinner ? 'bg-green-900/40 border border-green-600/50' :
+                              isFolded ? 'bg-gray-800/40 opacity-60' :
+                              'bg-gray-800/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              {/* Winner indicator */}
+                              <span className="w-6 text-center">
+                                {isWinner ? '👑' : isFolded ? '🃏' : ''}
+                              </span>
+
+                              {/* Player name */}
+                              <span className={`font-semibold ${isWinner ? 'text-green-400' : 'text-white'}`}>
+                                {player.name}
+                                {player.id === playerId && <span className="text-cyan-400 text-xs ml-1">(You)</span>}
+                              </span>
+
+                              {/* Hole cards - only for non-folded players */}
+                              {showCards ? (
+                                <div className="flex gap-1">
+                                  {player.holeCards.map((card, i) => (
+                                    <span
+                                      key={i}
+                                      className={`text-sm font-mono px-1 rounded ${
+                                        card.suit === 'hearts' || card.suit === 'diamonds'
+                                          ? 'text-red-400 bg-gray-700'
+                                          : 'text-white bg-gray-700'
+                                      }`}
+                                    >
+                                      {card.rank}{card.suit === 'hearts' ? '♥' : card.suit === 'diamonds' ? '♦' : card.suit === 'clubs' ? '♣' : '♠'}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-sm text-gray-500 italic">Folded</span>
+                              )}
+
+                              {/* Hand description - only for non-folded */}
+                              {player.handRank && showCards && (
+                                <span className={`text-sm ${isWinner ? 'text-green-300' : 'text-gray-400'}`}>
+                                  {player.handRank.description}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Stack change indicator */}
+                            <div className="text-right">
+                              {isWinner && (
+                                <span className="text-green-400 font-bold">Won</span>
+                              )}
+                              {!isWinner && !isFolded && (
+                                <span className="text-red-400 text-sm">Lost</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  {/* Hand value debug info (collapsible) - only for true showdown */}
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-gray-500 hover:text-gray-400">
+                      Hand Values (Debug)
+                    </summary>
+                    <div className="mt-1 bg-gray-900/50 p-2 rounded text-gray-400 font-mono space-y-2">
+                      <div className="text-gray-500">
+                        Board: {gameState.communityCards.map(c =>
+                          `${c.rank}${c.suit === 'hearts' ? '♥' : c.suit === 'diamonds' ? '♦' : c.suit === 'clubs' ? '♣' : '♠'}`
+                        ).join(' ')}
+                      </div>
+                      {gameState.players
+                        .filter(p => p.handRank && p.status !== 'folded')
+                        .sort((a, b) => (b.handRank?.value || 0) - (a.handRank?.value || 0))
+                        .map(p => {
+                          const cardsUsed = p.handRank?.cards?.map(c =>
+                            `${c.rank}${c.suit === 'hearts' ? '♥' : c.suit === 'diamonds' ? '♦' : c.suit === 'clubs' ? '♣' : '♠'}`
+                          ).join(' ') || 'N/A';
+                          return (
+                            <div key={p.id} className={p.isWinner ? 'text-green-400' : ''}>
+                              <div>{p.isWinner ? '👑 ' : '   '}{p.name}:</div>
+                              <div className="ml-4">Hole: {p.holeCards.map(c =>
+                                `${c.rank}${c.suit === 'hearts' ? '♥' : c.suit === 'diamonds' ? '♦' : c.suit === 'clubs' ? '♣' : '♠'}`
+                              ).join(' ')}</div>
+                              <div className="ml-4">Best 5: {cardsUsed}</div>
+                              <div className="ml-4">Hand: {p.handRank?.description}</div>
+                              <div className="ml-4">Value: {p.handRank?.value}</div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </details>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Start hand button */}
             {isSeated &&

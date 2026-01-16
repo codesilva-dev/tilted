@@ -46,6 +46,108 @@ interface GameRoom {
 const gameRooms = new Map<string, GameRoom>();
 const socketToPlayer = new Map<string, { playerId: string; playerName: string; tableId?: string }>();
 
+// Track disconnected players for reconnection grace period
+interface DisconnectedPlayer {
+  playerId: string;
+  playerName: string;
+  tableId: string;
+  disconnectedAt: Date;
+  timeoutId: NodeJS.Timeout;
+}
+const disconnectedPlayers = new Map<string, DisconnectedPlayer>();
+
+// Reconnection grace period in milliseconds (30 seconds)
+const RECONNECT_GRACE_PERIOD = 30000;
+
+/**
+ * Handle disconnection timeout - called when grace period expires
+ */
+async function handleDisconnectTimeout(playerId: string): Promise<void> {
+  const disconnectInfo = disconnectedPlayers.get(playerId);
+  if (!disconnectInfo) {
+    return; // Player already reconnected or was removed
+  }
+
+  const { playerName, tableId } = disconnectInfo;
+  disconnectedPlayers.delete(playerId);
+
+  log(`[Reconnect] Grace period expired for ${playerName} - processing disconnect`);
+
+  const room = gameRooms.get(tableId);
+  if (!room) {
+    return;
+  }
+
+  try {
+    const state = room.controller.getState();
+    const player = state.players.find(p => p.id === playerId);
+
+    if (!player) {
+      log(`[Reconnect] Player ${playerName} no longer at table`);
+      return;
+    }
+
+    const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
+
+    if (handInProgress) {
+      // Fold if it's their turn
+      if (player.status === 'active' && state.activePlayerPosition === player.seatPosition) {
+        log(`[Reconnect] ${playerName} timed out - folding (it's their turn)`);
+        try {
+          const foldAction: GameAction = {
+            type: 'fold',
+            playerId,
+            timestamp: new Date()
+          };
+          await room.controller.handleAction(foldAction);
+        } catch (error) {
+          console.error('[Reconnect] Error folding player:', error);
+        }
+      }
+
+      // Mark as leaving
+      room.controller.markPlayerAsLeaving(playerId);
+      log(`[Reconnect] ${playerName} marked as leaving after timeout`);
+
+      // Check if hand ended
+      const updatedState = room.controller.getState();
+      if (updatedState.currentStreet === 'showdown') {
+        const remainingActivePlayers = updatedState.players.filter(p => !p.isLeaving);
+        if (remainingActivePlayers.length < 2) {
+          log(`[Reconnect] Cleaning up after timeout - not enough players`);
+          const leavingPlayers = room.controller.removeLeavingPlayers();
+          for (const leavingPlayer of leavingPlayers) {
+            room.seatedPlayers.delete(leavingPlayer.id);
+          }
+          room.controller.resetToWaiting();
+        }
+      }
+    } else {
+      // No hand in progress - remove immediately
+      room.controller.removePlayer(playerId);
+      room.seatedPlayers.delete(playerId);
+      log(`[Reconnect] ${playerName} removed after timeout (no hand in progress)`);
+
+      const updatedState = room.controller.getState();
+      const remainingPlayers = updatedState.players.filter(p => !p.isLeaving);
+      if (remainingPlayers.length < 2 && updatedState.currentStreet === 'showdown') {
+        room.controller.resetToWaiting();
+      }
+    }
+
+    // Remove from spectators
+    room.spectators.delete(playerId);
+
+    // Broadcast updates
+    const finalState = room.controller.getState();
+    io.to(tableId).emit('player-disconnected', { playerId });
+    io.to(tableId).emit('game-state', { table: finalState });
+
+  } catch (error) {
+    console.error('[Reconnect] Error handling disconnect timeout:', error);
+  }
+}
+
 /**
  * Create HTTP server and Socket.IO instance
  */
@@ -241,7 +343,7 @@ io.on('connection', (socket: Socket) => {
   });
 
   /**
-   * Join a table as spectator
+   * Join a table as spectator (or reconnect if disconnected)
    */
   socket.on('join-room', (data: { tableId: string; playerId: string; playerName: string }) => {
     try {
@@ -252,6 +354,44 @@ io.on('connection', (socket: Socket) => {
         throw new Error('Table not found');
       }
 
+      // Check if this is a reconnection
+      const disconnectInfo = disconnectedPlayers.get(playerId);
+      if (disconnectInfo && disconnectInfo.tableId === tableId) {
+        // Cancel the disconnect timeout
+        clearTimeout(disconnectInfo.timeoutId);
+        disconnectedPlayers.delete(playerId);
+
+        log(`[Reconnect] ${playerName} reconnected to ${tableId} within grace period!`);
+
+        // Join Socket.IO room
+        socket.join(tableId);
+
+        // Store player info
+        socket.data.tableId = tableId;
+        socket.data.playerId = playerId;
+        socket.data.playerName = playerName;
+        socketToPlayer.set(socket.id, { playerId, playerName, tableId });
+
+        // Send current game state
+        const state = room.controller.getState();
+        socket.emit('game-state', { table: state });
+
+        // Notify others that player reconnected
+        socket.to(tableId).emit('player-reconnected', {
+          playerId,
+          playerName
+        });
+
+        // Send seat availability
+        const occupiedSeats = state.players.map(p => p.seatPosition);
+        const availableSeats = Array.from({ length: room.config.maxSeats }, (_, i) => i + 1)
+          .filter(seat => !occupiedSeats.includes(seat));
+        socket.emit('seats-available', { availableSeats, occupiedSeats });
+
+        return;
+      }
+
+      // Normal join (not a reconnection)
       // Join Socket.IO room
       socket.join(tableId);
 
@@ -261,28 +401,45 @@ io.on('connection', (socket: Socket) => {
       socket.data.playerName = playerName;
       socketToPlayer.set(socket.id, { playerId, playerName, tableId });
 
-      // Add as spectator
-      room.spectators.set(playerId, { id: playerId, name: playerName });
+      // Check if player is already seated (browser refresh scenario)
+      const state = room.controller.getState();
+      const existingPlayer = state.players.find(p => p.id === playerId);
 
-      // Send current game state
-      socket.emit('game-state', { table: room.controller.getState() });
+      if (existingPlayer) {
+        // Player is already seated - just reconnect them
+        log(`[Join Room] ${playerName} rejoined ${tableId} (already seated at position ${existingPlayer.seatPosition})`);
 
-      // Notify others
-      socket.to(tableId).emit('spectator-joined', {
-        playerId,
-        playerName,
-        spectatorCount: room.spectators.size
-      });
+        // Send current game state
+        socket.emit('game-state', { table: state });
+
+        // Notify others
+        socket.to(tableId).emit('player-reconnected', {
+          playerId,
+          playerName
+        });
+      } else {
+        // Add as spectator
+        room.spectators.set(playerId, { id: playerId, name: playerName });
+
+        // Send current game state
+        socket.emit('game-state', { table: state });
+
+        // Notify others
+        socket.to(tableId).emit('spectator-joined', {
+          playerId,
+          playerName,
+          spectatorCount: room.spectators.size
+        });
+
+        log(`[Join Room] ${playerName} joined ${tableId} as spectator`);
+      }
 
       // Send seat availability (seats 1-9)
-      const state = room.controller.getState();
       const occupiedSeats = state.players.map(p => p.seatPosition);
       const availableSeats = Array.from({ length: room.config.maxSeats }, (_, i) => i + 1)
         .filter(seat => !occupiedSeats.includes(seat));
 
       socket.emit('seats-available', { availableSeats, occupiedSeats });
-
-      log(`[Join Room] ${playerName} joined ${tableId} as spectator`);
 
     } catch (error) {
       console.error('[Join Room Error]', error);
@@ -705,83 +862,60 @@ io.on('connection', (socket: Socket) => {
 
     const playerInfo = socketToPlayer.get(socket.id);
     if (playerInfo && playerInfo.tableId) {
-      const { playerId, tableId } = playerInfo;
+      const { playerId, playerName, tableId } = playerInfo;
       const room = gameRooms.get(tableId);
 
       if (room) {
-        // If player is seated and in an active hand, fold them only if it's their turn
         const state = room.controller.getState();
         const player = state.players.find(p => p.id === playerId);
 
+        // If player is seated, start reconnection grace period
         if (player) {
-          const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
+          log(`[Disconnect] ${player.name} disconnected - starting ${RECONNECT_GRACE_PERIOD / 1000}s grace period for reconnection`);
 
-          if (handInProgress) {
-            // Only fold if it's the player's turn
-            if (player.status === 'active' && state.activePlayerPosition === player.seatPosition) {
-              log(`[Disconnect] ${player.name} disconnected mid-hand - folding (it was their turn)`);
-              try {
-                const foldAction: import("../game/types/game-state").GameAction = {
-                  type: 'fold',
-                  playerId,
-                  timestamp: new Date()
-                };
-                await room.controller.handleAction(foldAction);
-              } catch (error) {
-                console.error('[Disconnect] Error folding player hand:', error);
-              }
-            } else {
-              log(`[Disconnect] ${player.name} disconnected mid-hand - not their turn, marking as leaving`);
-            }
-            // Mark player as leaving
-            room.controller.markPlayerAsLeaving(playerId);
-            log(`[Disconnect] ${player.name} marked as leaving, will be removed after hand`);
-
-            // Check if the fold caused the hand to end and cleanup if needed
-            const updatedState = room.controller.getState();
-            if (updatedState.currentStreet === 'showdown') {
-              const remainingActivePlayers = updatedState.players.filter(p => !p.isLeaving);
-              if (remainingActivePlayers.length < 2) {
-                log(`[Disconnect] Hand ended and not enough active players - cleaning up`);
-                const leavingPlayers = room.controller.removeLeavingPlayers();
-                for (const leavingPlayer of leavingPlayers) {
-                  room.seatedPlayers.delete(leavingPlayer.id);
-                }
-                room.controller.resetToWaiting();
-              }
-            }
-          } else {
-            // No hand in progress (or at showdown): Remove immediately
-            room.controller.removePlayer(playerId);
-            room.seatedPlayers.delete(playerId);
-            log(`[Disconnect] ${player.name} removed from table`);
-
-            // Check if we need to reset to waiting
-            const updatedState = room.controller.getState();
-            const remainingPlayers = updatedState.players.filter(p => !p.isLeaving);
-            if (remainingPlayers.length < 2 && state.currentStreet === 'showdown') {
-              log(`[Disconnect] Not enough players remaining - resetting to waiting`);
-              room.controller.resetToWaiting();
-            }
+          // Cancel any existing timeout for this player
+          const existingDisconnect = disconnectedPlayers.get(playerId);
+          if (existingDisconnect) {
+            clearTimeout(existingDisconnect.timeoutId);
           }
+
+          // Start grace period timeout
+          const timeoutId = setTimeout(() => {
+            handleDisconnectTimeout(playerId);
+          }, RECONNECT_GRACE_PERIOD);
+
+          disconnectedPlayers.set(playerId, {
+            playerId,
+            playerName: player.name,
+            tableId,
+            disconnectedAt: new Date(),
+            timeoutId
+          });
+
+          // Notify other players that this player is disconnected (but not removed yet)
+          socket.to(tableId).emit('player-disconnected-temp', {
+            playerId,
+            playerName: player.name,
+            gracePeriod: RECONNECT_GRACE_PERIOD
+          });
+
+        } else {
+          // Player was just a spectator - remove immediately
+          room.spectators.delete(playerId);
+          log(`[Disconnect] Spectator ${playerName || playerId} removed from ${tableId}`);
         }
 
-        // Remove from spectators and seated players
-        room.spectators.delete(playerId);
-
-        // Get updated state
-        const updatedState = room.controller.getState();
-
-        socket.to(tableId).emit('player-disconnected', { playerId });
-        io.to(tableId).emit('game-state', { table: updatedState });
-
-        log(`[Disconnect] Player ${playerId} disconnected from ${tableId}`);
-
-        // Clean up non-quickplay empty rooms
+        // Clean up non-quickplay empty rooms (only if no seated players)
         if (!room.config.isQuickplay && room.spectators.size === 0 && room.seatedPlayers.size === 0) {
-          gameRooms.delete(tableId);
-          io.emit('table-deleted', { tableId });
-          log(`[Table Deleted] ${tableId} (empty after disconnect)`);
+          // Check if any disconnected players might reconnect
+          const hasDisconnectedPlayers = Array.from(disconnectedPlayers.values())
+            .some(dp => dp.tableId === tableId);
+
+          if (!hasDisconnectedPlayers) {
+            gameRooms.delete(tableId);
+            io.emit('table-deleted', { tableId });
+            log(`[Table Deleted] ${tableId} (empty after disconnect)`);
+          }
         }
       }
     }
@@ -824,6 +958,21 @@ process.on('SIGINT', () => {
     log('[Shutdown] Server closed');
     process.exit(0);
   });
+});
+
+/**
+ * Handle uncaught exceptions to prevent silent crashes
+ */
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught exception:', error);
+  console.error(error.stack);
+  // Keep the server running but log the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled promise rejection:', reason);
+  console.error('Promise:', promise);
+  // Keep the server running but log the error
 });
 
 export { io, httpServer, gameRooms };

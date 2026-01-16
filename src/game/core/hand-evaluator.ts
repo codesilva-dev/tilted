@@ -232,7 +232,13 @@ function calculateValue(type: HandType, cards: Card[]): number {
 }
 
 export function compareHands(hand1: HandRank, hand2: HandRank): number {
-    return hand1.value - hand2.value
+    // Use a small epsilon for floating point comparison safety
+    const diff = hand1.value - hand2.value;
+    // If the difference is very small (less than 0.5), consider them equal
+    if (Math.abs(diff) < 0.5) {
+        return 0;
+    }
+    return diff;
 }
 
 export function findBestHand(cards: Card[]): HandRank {
