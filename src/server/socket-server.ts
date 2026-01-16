@@ -210,6 +210,15 @@ function createQuickplayTable() {
  */
 function setupControllerEventHandlers(controller: HandController, tableId: string): void {
   controller.on((event: HandEvent) => {
+    // Handle error event separately (doesn't have table property)
+    if (event.type === 'error') {
+      console.error(`[Event][${tableId}] ERROR: ${event.error.message}`);
+      io.to(tableId).emit('game-error', {
+        message: event.error.message
+      });
+      return;
+    }
+
     // Create log prefix with hand number for context
     const handNum = event.table.handNumber;
     const prefix = `[Event][Hand #${handNum}][${tableId}]`;
@@ -275,13 +284,6 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
         io.to(tableId).emit('game-state', { table: event.table });
         io.to(tableId).emit('players-removed', { playerIds: event.removedPlayers.map(p => p.id) });
         log(`${prefix} PLAYERS REMOVED: [${event.removedPlayers.map(p => p.name).join(', ')}]`);
-        break;
-
-      case 'error':
-        io.to(tableId).emit('game-error', {
-          message: event.error.message
-        });
-        console.error(`${prefix} ERROR: ${event.error.message}`);
         break;
     }
   });
