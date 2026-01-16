@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { createServer } from 'http';
 import { HandController, HandEvent } from '../game/engine/hand-controller';
 import { TableState, GameAction, createInitialTableState, createPlayer } from '../game/types/game-state';
+import { log } from '../util/log';
 
 /**
  * Socket.IO Server v2 - With Seat Selection
@@ -77,7 +78,7 @@ function getOrCreateRoom(config: TableConfig): GameRoom {
     setupControllerEventHandlers(controller, config.tableId);
     gameRooms.set(config.tableId, room);
 
-    console.log(`[Table Created] ${config.name} (${config.tableId}) - SB: ${config.smallBlind}, BB: ${config.bigBlind}`);
+    log(`[Table Created] ${config.name} (${config.tableId}) - SB: ${config.smallBlind}, BB: ${config.bigBlind}`);
   }
 
   return room;
@@ -99,7 +100,7 @@ function createQuickplayTable() {
   };
 
   getOrCreateRoom(quickplayConfig);
-  console.log('[Quickplay] Permanent quickplay table created');
+  log('[Quickplay] Permanent quickplay table created');
 }
 
 /**
@@ -110,17 +111,17 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
     switch (event.type) {
       case 'hand-started':
         io.to(tableId).emit('hand-started', { table: event.table });
-        console.log(`[Event] Hand started at table ${tableId}`);
+        log(`[Event] Hand started at table ${tableId}`);
         break;
 
       case 'blinds-posted':
         io.to(tableId).emit('blinds-posted', { table: event.table });
-        console.log(`[Event] Blinds posted at table ${tableId}`);
+        log(`[Event] Blinds posted at table ${tableId}`);
         break;
 
       case 'cards-dealt':
         io.to(tableId).emit('cards-dealt', { table: event.table });
-        console.log(`[Event] Cards dealt at table ${tableId}`);
+        log(`[Event] Cards dealt at table ${tableId}`);
         break;
 
       case 'action-processed':
@@ -128,7 +129,7 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
           table: event.table,
           action: event.action
         });
-        console.log(`[Event] Action processed at table ${tableId}:`, event.action.type);
+        log(`[Event] Action processed at table ${tableId}: ${event.action.type}`);
         break;
 
       case 'street-changed':
@@ -136,7 +137,7 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
           table: event.table,
           street: event.street
         });
-        console.log(`[Event] Street changed to ${event.street} at table ${tableId}`);
+        log(`[Event] Street changed to ${event.street} at table ${tableId}`);
         break;
 
       case 'hand-completed':
@@ -145,7 +146,7 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
           result: event.result
         });
         io.to(tableId).emit('game-state', { table: event.table });
-        console.log(`[Event] Hand completed at table ${tableId}`);
+        log(`[Event] Hand completed at table ${tableId}`);
         // Leaving players will be removed when startHand is called after the countdown
         break;
 
@@ -157,14 +158,14 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
             roomForRemoval.seatedPlayers.delete(player.id);
             // Move to spectators so they can sit again
             roomForRemoval.spectators.set(player.id, { id: player.id, name: player.name });
-            console.log(`[Event] Player ${player.name} moved to spectators`);
+            log(`[Event] Player ${player.name} moved to spectators`);
           }
         }
 
         // Broadcast updated game state
         io.to(tableId).emit('game-state', { table: event.table });
         io.to(tableId).emit('players-removed', { playerIds: event.removedPlayers.map(p => p.id) });
-        console.log(`[Event] Removed ${event.removedPlayers.length} players from table ${tableId}`);
+        log(`[Event] Removed ${event.removedPlayers.length} players from table ${tableId}`);
         break;
 
       case 'error':
@@ -201,7 +202,7 @@ function getTableInfo(room: GameRoom) {
  * Handle client connections
  */
 io.on('connection', (socket: Socket) => {
-  console.log(`[Connection] Client connected: ${socket.id}`);
+  log(`[Connection] Client connected: ${socket.id}`);
 
   /**
    * Get list of all tables (for lobby)
@@ -229,7 +230,7 @@ io.on('connection', (socket: Socket) => {
       io.emit('table-created', { table: getTableInfo(gameRooms.get(tableId)!) });
 
       socket.emit('table-created-success', { tableId });
-      console.log(`[Table Created] ${config.name} by ${socket.id}`);
+      log(`[Table Created] ${config.name} by ${socket.id}`);
 
     } catch (error) {
       console.error('[Create Table Error]', error);
@@ -281,7 +282,7 @@ io.on('connection', (socket: Socket) => {
 
       socket.emit('seats-available', { availableSeats, occupiedSeats });
 
-      console.log(`[Join Room] ${playerName} joined ${tableId} as spectator`);
+      log(`[Join Room] ${playerName} joined ${tableId} as spectator`);
 
     } catch (error) {
       console.error('[Join Room Error]', error);
@@ -345,7 +346,7 @@ io.on('connection', (socket: Socket) => {
         seatedCount: state.players.length
       });
 
-      console.log(`[Take Seat] ${spectator.name} sat at seat ${seatPosition} on ${tableId}`);
+      log(`[Take Seat] ${spectator.name} sat at seat ${seatPosition} on ${tableId}`);
 
     } catch (error) {
       console.error('[Take Seat Error]', error);
@@ -383,7 +384,7 @@ io.on('connection', (socket: Socket) => {
       if (handInProgress) {
         // Mid-hand: Fold and mark as leaving
         if (player.status === 'active') {
-          console.log(`[Leave Seat] ${playerName} leaving mid-hand - folding and marking as leaving`);
+          log(`[Leave Seat] ${playerName} leaving mid-hand - folding and marking as leaving`);
           const foldAction: GameAction = {
             type: 'fold',
             playerId,
@@ -396,26 +397,66 @@ io.on('connection', (socket: Socket) => {
         room.controller.markPlayerAsLeaving(playerId);
 
         // Get updated state after fold
-        const updatedState = room.controller.getState();
+        let updatedState = room.controller.getState();
+
+        // Check if the fold caused the hand to end (now at showdown)
+        // AND if all remaining players are also leaving
+        if (updatedState.currentStreet === 'showdown') {
+          const remainingActivePlayers = updatedState.players.filter(p => !p.isLeaving);
+          if (remainingActivePlayers.length < 2) {
+            // All players are leaving or only one remains - cleanup immediately
+            log(`[Leave Seat] Hand ended and not enough active players remaining - cleaning up`);
+            const leavingPlayers = room.controller.removeLeavingPlayers();
+            for (const leavingPlayer of leavingPlayers) {
+              room.seatedPlayers.delete(leavingPlayer.id);
+              room.spectators.set(leavingPlayer.id, { id: leavingPlayer.id, name: leavingPlayer.name });
+              log(`[Leave Seat] Removed leaving player ${leavingPlayer.name}`);
+            }
+            room.controller.resetToWaiting();
+            updatedState = room.controller.getState();
+          }
+        }
 
         // Broadcast updated state (player still at table but folded and marked as leaving)
         io.to(tableId).emit('game-state', { table: updatedState });
 
-        console.log(`[Leave Seat] ${playerName} marked as leaving, will be removed after hand`);
+        log(`[Leave Seat] ${playerName} marked as leaving, will be removed after hand`);
 
       } else if (state.currentStreet === 'showdown') {
-        // At showdown: Mark as leaving, will be removed when next hand starts
-        console.log(`[Leave Seat] ${playerName} leaving during showdown - marking as leaving`);
-        room.controller.markPlayerAsLeaving(playerId);
+        // At showdown: Hand is complete, player can leave immediately
+        log(`[Leave Seat] ${playerName} leaving during showdown - removing immediately`);
 
-        const updatedState = room.controller.getState();
+        // Remove from seated players
+        room.controller.removePlayer(playerId);
+        room.seatedPlayers.delete(playerId);
+
+        // Add back to spectators
+        room.spectators.set(playerId, { id: playerId, name: playerName });
+
+        // Get updated state after removal
+        let updatedState = room.controller.getState();
+
+        // Check if we need to reset to waiting (not enough players left)
+        const remainingPlayers = updatedState.players.filter(p => !p.isLeaving);
+        if (remainingPlayers.length < 2) {
+          log(`[Leave Seat] Not enough players remaining (${remainingPlayers.length}) - resetting to waiting`);
+          room.controller.resetToWaiting();
+          updatedState = room.controller.getState();
+        }
+
+        // Broadcast updated state
         io.to(tableId).emit('game-state', { table: updatedState });
+        io.to(tableId).emit('player-left-seat', {
+          playerId,
+          seatPosition,
+          seatedCount: updatedState.players.length
+        });
 
-        console.log(`[Leave Seat] ${playerName} marked as leaving, will be removed when countdown ends`);
+        log(`[Leave Seat] ${playerName} left seat on ${tableId}`);
 
       } else {
         // No hand in progress: Remove immediately
-        console.log(`[Leave Seat] ${playerName} leaving between hands - removing immediately`);
+        log(`[Leave Seat] ${playerName} leaving between hands - removing immediately`);
 
         // Remove from seated players using the controller method
         room.controller.removePlayer(playerId);
@@ -435,7 +476,7 @@ io.on('connection', (socket: Socket) => {
           seatedCount: updatedState.players.length
         });
 
-        console.log(`[Leave Seat] ${playerName} left seat on ${tableId}`);
+        log(`[Leave Seat] ${playerName} left seat on ${tableId}`);
       }
 
     } catch (error) {
@@ -468,7 +509,7 @@ io.on('connection', (socket: Socket) => {
         if (handInProgress) {
           // Mid-hand: Fold and mark as leaving
           if (player.status === 'active') {
-            console.log(`[Leave Room] ${player.name} leaving mid-hand - folding`);
+            log(`[Leave Room] ${player.name} leaving mid-hand - folding`);
             const foldAction: GameAction = {
               type: 'fold',
               playerId,
@@ -480,12 +521,12 @@ io.on('connection', (socket: Socket) => {
           // Mark player as leaving
           room.controller.markPlayerAsLeaving(playerId);
 
-          console.log(`[Leave Room] ${player.name} marked as leaving, will be removed after hand`);
+          log(`[Leave Room] ${player.name} marked as leaving, will be removed after hand`);
         } else {
           // No hand in progress: Remove immediately
           room.controller.removePlayer(playerId);
           room.seatedPlayers.delete(playerId);
-          console.log(`[Leave Room] ${player.name} removed from table`);
+          log(`[Leave Room] ${player.name} removed from table`);
         }
       }
 
@@ -502,13 +543,13 @@ io.on('connection', (socket: Socket) => {
       socket.to(tableId).emit('player-left-room', { playerId });
       io.to(tableId).emit('game-state', { table: updatedState });
 
-      console.log(`[Leave Room] ${playerId} left ${tableId}`);
+      log(`[Leave Room] ${playerId} left ${tableId}`);
 
       // Clean up non-quickplay empty rooms
       if (!room.config.isQuickplay && room.spectators.size === 0 && room.seatedPlayers.size === 0) {
         gameRooms.delete(tableId);
         io.emit('table-deleted', { tableId });
-        console.log(`[Table Deleted] ${tableId} (empty)`);
+        log(`[Table Deleted] ${tableId} (empty)`);
       }
 
     } catch (error) {
@@ -535,7 +576,7 @@ io.on('connection', (socket: Socket) => {
       const handInProgress = isActiveStreet || isPreflopWithAction;
 
       if (handInProgress) {
-        console.log(`[Start Hand] Hand already in progress at table ${tableId}, ignoring duplicate call`);
+        log(`[Start Hand] Hand already in progress at table ${tableId}, ignoring duplicate call`);
         return;
       }
 
@@ -546,7 +587,7 @@ io.on('connection', (socket: Socket) => {
         for (const player of leavingPlayers) {
           room.seatedPlayers.delete(player.id);
           room.spectators.set(player.id, { id: player.id, name: player.name });
-          console.log(`[Start Hand] Player ${player.name} removed and moved to spectators`);
+          log(`[Start Hand] Player ${player.name} removed and moved to spectators`);
         }
         io.to(tableId).emit('players-removed', { playerIds: leavingPlayers.map(p => p.id) });
       }
@@ -558,7 +599,7 @@ io.on('connection', (socket: Socket) => {
 
       if (activePlayers.length < 2) {
         // Not enough players - just reset to waiting state, don't try to start
-        console.log(`[Start Hand] Not enough active players with chips (${activePlayers.length}) - resetting to waiting`);
+        log(`[Start Hand] Not enough active players with chips (${activePlayers.length}) - resetting to waiting`);
         room.controller.resetToWaiting();
         const updatedState = room.controller.getState();
         io.to(tableId).emit('game-state', { table: updatedState });
@@ -566,7 +607,7 @@ io.on('connection', (socket: Socket) => {
       }
 
       // Enough players - start the hand
-      console.log(`[Start Hand] Starting hand at table ${tableId}`);
+      log(`[Start Hand] Starting hand at table ${tableId}`);
       await room.controller.startHand();
 
     } catch (error) {
@@ -582,7 +623,7 @@ io.on('connection', (socket: Socket) => {
           room.controller.resetToWaiting();
           const updatedState = room.controller.getState();
           io.to(tableId).emit('game-state', { table: updatedState });
-          console.log(`[Start Hand] Table ${tableId} reset to waiting state (not enough players)`);
+          log(`[Start Hand] Table ${tableId} reset to waiting state (not enough players)`);
         }
       } else {
         socket.emit('action-error', { message: errorMessage });
@@ -602,7 +643,7 @@ io.on('connection', (socket: Socket) => {
         throw new Error('Table not found');
       }
 
-      console.log(`[Action] Player ${action.playerId} at table ${tableId}: ${action.type}${action.amount ? ` ${action.amount}` : ''}`);
+      log(`[Action] Player ${action.playerId} at table ${tableId}: ${action.type}${action.amount ? ` ${action.amount}` : ''}`);
 
       await room.controller.handleAction(action);
 
@@ -641,7 +682,7 @@ io.on('connection', (socket: Socket) => {
    * Handle disconnect
    */
   socket.on('disconnect', async () => {
-    console.log(`[Disconnect] Client disconnected: ${socket.id}`);
+    log(`[Disconnect] Client disconnected: ${socket.id}`);
 
     const playerInfo = socketToPlayer.get(socket.id);
     if (playerInfo && playerInfo.tableId) {
@@ -654,12 +695,12 @@ io.on('connection', (socket: Socket) => {
         const player = state.players.find(p => p.id === playerId);
 
         if (player) {
-          const handInProgress = player.holeCards.length > 0;
+          const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
           if (handInProgress) {
             // Mid-hand: Fold and mark as leaving
             if (player.status === 'active') {
-              console.log(`[Disconnect] ${player.name} disconnected mid-hand - folding`);
+              log(`[Disconnect] ${player.name} disconnected mid-hand - folding`);
               try {
                 const foldAction: GameAction = {
                   type: 'fold',
@@ -674,12 +715,34 @@ io.on('connection', (socket: Socket) => {
 
             // Mark player as leaving
             room.controller.markPlayerAsLeaving(playerId);
-            console.log(`[Disconnect] ${player.name} marked as leaving, will be removed after hand`);
+            log(`[Disconnect] ${player.name} marked as leaving, will be removed after hand`);
+
+            // Check if the fold caused the hand to end and cleanup if needed
+            const updatedState = room.controller.getState();
+            if (updatedState.currentStreet === 'showdown') {
+              const remainingActivePlayers = updatedState.players.filter(p => !p.isLeaving);
+              if (remainingActivePlayers.length < 2) {
+                log(`[Disconnect] Hand ended and not enough active players - cleaning up`);
+                const leavingPlayers = room.controller.removeLeavingPlayers();
+                for (const leavingPlayer of leavingPlayers) {
+                  room.seatedPlayers.delete(leavingPlayer.id);
+                }
+                room.controller.resetToWaiting();
+              }
+            }
           } else {
-            // No hand in progress: Remove immediately
+            // No hand in progress (or at showdown): Remove immediately
             room.controller.removePlayer(playerId);
             room.seatedPlayers.delete(playerId);
-            console.log(`[Disconnect] ${player.name} removed from table`);
+            log(`[Disconnect] ${player.name} removed from table`);
+
+            // Check if we need to reset to waiting
+            const updatedState = room.controller.getState();
+            const remainingPlayers = updatedState.players.filter(p => !p.isLeaving);
+            if (remainingPlayers.length < 2 && state.currentStreet === 'showdown') {
+              log(`[Disconnect] Not enough players remaining - resetting to waiting`);
+              room.controller.resetToWaiting();
+            }
           }
         }
 
@@ -692,13 +755,13 @@ io.on('connection', (socket: Socket) => {
         socket.to(tableId).emit('player-disconnected', { playerId });
         io.to(tableId).emit('game-state', { table: updatedState });
 
-        console.log(`[Disconnect] Player ${playerId} disconnected from ${tableId}`);
+        log(`[Disconnect] Player ${playerId} disconnected from ${tableId}`);
 
         // Clean up non-quickplay empty rooms
         if (!room.config.isQuickplay && room.spectators.size === 0 && room.seatedPlayers.size === 0) {
           gameRooms.delete(tableId);
           io.emit('table-deleted', { tableId });
-          console.log(`[Table Deleted] ${tableId} (empty after disconnect)`);
+          log(`[Table Deleted] ${tableId} (empty after disconnect)`);
         }
       }
     }
@@ -714,7 +777,7 @@ httpServer.listen(PORT, () => {
   // Create quickplay table
   createQuickplayTable();
 
-  console.log(`
+  log(`
 ╔═══════════════════════════════════════════════════════╗
 ║     Poker Socket.IO Server v2                        ║
 ║     Port: ${PORT.toString().padEnd(43)}║
@@ -728,17 +791,17 @@ httpServer.listen(PORT, () => {
  * Graceful shutdown
  */
 process.on('SIGTERM', () => {
-  console.log('\n[Shutdown] Received SIGTERM, closing server...');
+  log('\n[Shutdown] Received SIGTERM, closing server...');
   httpServer.close(() => {
-    console.log('[Shutdown] Server closed');
+    log('[Shutdown] Server closed');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', () => {
-  console.log('\n[Shutdown] Received SIGINT, closing server...');
+  log('\n[Shutdown] Received SIGINT, closing server...');
   httpServer.close(() => {
-    console.log('[Shutdown] Server closed');
+    log('[Shutdown] Server closed');
     process.exit(0);
   });
 });

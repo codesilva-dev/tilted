@@ -3,6 +3,218 @@ import { HandController } from './hand-controller';
 import { createInitialTableState, createPlayer, GameAction } from '../types/game-state';
 import { shuffleDeck } from '../core/cards';
 
+describe('HandController - All-in Auto-Advance Tests', () => {
+  /**
+   * CRITICAL FIX TEST: All players all-in on turn should auto-advance to showdown
+   *
+   * This test verifies that when all remaining players go all-in before the river,
+   * the game automatically deals the remaining community cards and proceeds to showdown.
+   *
+   * Scenario (matching user bug report):
+   * - 3 players: Alice, Bob, Charlie
+   * - Charlie folds on flop
+   * - Alice goes all-in for 1300 on turn
+   * - Bob goes all-in for 1000 on turn (smaller stack)
+   * - No active players can act -> should auto-deal river and go to showdown
+   */
+  test('auto-advances to showdown when all players are all-in on turn', async () => {
+    const table = createInitialTableState('t1', 'Test Table', 10, 20);
+
+    // Setup 3 players with different stacks
+    const alice = createPlayer('alice', 'Alice', 1, 1300);   // Will go all-in for 1300
+    const bob = createPlayer('bob', 'Bob', 2, 1000);         // Will go all-in for 1000
+    const charlie = createPlayer('charlie', 'Charlie', 3, 1000); // Will fold
+
+    table.players.push(alice, bob, charlie);
+    table.dealerPosition = 1;
+
+    const controller = new HandController(table);
+
+    // Track events
+    const events: string[] = [];
+    controller.on(event => {
+      events.push(event.type);
+    });
+
+    await controller.startHand();
+
+    // Set up controlled cards
+    const internalState = controller['state'];
+    internalState.players.find(p => p.id === 'alice')!.holeCards = [
+      { rank: 'A', suit: 'spades' }, { rank: 'K', suit: 'spades' }
+    ];
+    internalState.players.find(p => p.id === 'bob')!.holeCards = [
+      { rank: 'Q', suit: 'hearts' }, { rank: 'Q', suit: 'diamonds' }
+    ];
+    internalState.players.find(p => p.id === 'charlie')!.holeCards = [
+      { rank: '2', suit: 'clubs' }, { rank: '3', suit: 'clubs' }
+    ];
+
+    // Set controlled deck for remaining community cards
+    internalState.deck = [
+      // Burn + Flop
+      { rank: '4', suit: 'clubs' }, { rank: 'A', suit: 'hearts' }, { rank: 'K', suit: 'hearts' }, { rank: '7', suit: 'diamonds' },
+      // Burn + Turn
+      { rank: '5', suit: 'clubs' }, { rank: '8', suit: 'spades' },
+      // Burn + River
+      { rank: '6', suit: 'clubs' }, { rank: '9', suit: 'spades' }
+    ];
+
+    let state = controller.getState();
+
+    // PRE-FLOP: Everyone calls
+    // First to act calls
+    let activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'call', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'call', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'check', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    expect(state.currentStreet).toBe('flop');
+
+    // FLOP: Charlie folds, others check
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'check', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'check', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    // Charlie folds
+    await controller.handleAction({ type: 'fold', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    expect(state.currentStreet).toBe('turn');
+
+    // TURN: This is where the bug occurred
+    // Alice goes all-in for remaining stack (1300 - 20 blind = 1280)
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    const aliceStack = state.players.find(p => p.id === 'alice')!.stack;
+    await controller.handleAction({ type: 'all-in', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    // Bob goes all-in for remaining stack (1000 - 20 blind = 980)
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'all-in', playerId: activePlayer.id, timestamp: new Date() });
+
+    // After both all-ins, the game should automatically:
+    // 1. Deal the river (no active players to act)
+    // 2. Go to showdown
+    state = controller.getState();
+
+    // CRITICAL: Should be at showdown, not stuck on turn/river
+    expect(state.currentStreet).toBe('showdown');
+
+    // Verify all community cards were dealt
+    expect(state.communityCards.length).toBe(5);
+
+    // Verify events were emitted (should include street-changed for river and hand-completed)
+    expect(events).toContain('street-changed');
+    expect(events).toContain('hand-completed');
+
+    // Verify winners were determined
+    const winners = state.players.filter(p => p.isWinner);
+    expect(winners.length).toBeGreaterThan(0);
+
+    // Alice should win (AA vs QQ with A K 7 8 9 board)
+    const aliceWinner = state.players.find(p => p.id === 'alice')!;
+    expect(aliceWinner.isWinner).toBe(true);
+
+    // Verify side pot - Alice should get back excess chips (300)
+    // Alice bet 1300, Bob only had 1000
+    // Main pot: 1000 * 2 = 2000 (both eligible)
+    // Side pot: 300 (only Alice eligible - she gets it back regardless)
+    const aliceFinal = state.players.find(p => p.id === 'alice')!;
+    const bobFinal = state.players.find(p => p.id === 'bob')!;
+
+    // Alice should have won everything
+    expect(aliceFinal.stack).toBeGreaterThan(1300);
+
+    console.log('=== ALL-IN AUTO-ADVANCE TEST RESULTS ===');
+    console.log('Final street:', state.currentStreet);
+    console.log('Community cards:', state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' '));
+    console.log('Alice stack:', aliceFinal.stack, '(started with 1300)');
+    console.log('Bob stack:', bobFinal.stack, '(started with 1000)');
+    console.log('Events emitted:', events.join(', '));
+  });
+
+  test('auto-advances through multiple streets when all-in on pre-flop', async () => {
+    const table = createInitialTableState('t1', 'Test Table', 10, 20);
+
+    // Setup 2 players
+    const alice = createPlayer('alice', 'Alice', 1, 500);
+    const bob = createPlayer('bob', 'Bob', 2, 500);
+
+    table.players.push(alice, bob);
+    table.dealerPosition = 1;
+
+    const controller = new HandController(table);
+
+    // Track events
+    const streetChanges: string[] = [];
+    controller.on(event => {
+      if (event.type === 'street-changed') {
+        streetChanges.push(event.street);
+      }
+    });
+
+    await controller.startHand();
+
+    // Set controlled cards
+    const internalState = controller['state'];
+    internalState.players.find(p => p.id === 'alice')!.holeCards = [
+      { rank: 'A', suit: 'spades' }, { rank: 'A', suit: 'hearts' }
+    ];
+    internalState.players.find(p => p.id === 'bob')!.holeCards = [
+      { rank: 'K', suit: 'spades' }, { rank: 'K', suit: 'hearts' }
+    ];
+
+    internalState.deck = [
+      // Burn + Flop
+      { rank: '4', suit: 'clubs' }, { rank: '2', suit: 'hearts' }, { rank: '3', suit: 'hearts' }, { rank: '7', suit: 'diamonds' },
+      // Burn + Turn
+      { rank: '5', suit: 'clubs' }, { rank: '8', suit: 'spades' },
+      // Burn + River
+      { rank: '6', suit: 'clubs' }, { rank: '9', suit: 'spades' }
+    ];
+
+    let state = controller.getState();
+
+    // Pre-flop: Alice all-in
+    let activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'all-in', playerId: activePlayer.id, timestamp: new Date() });
+
+    state = controller.getState();
+    // Bob calls all-in
+    activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition)!;
+    await controller.handleAction({ type: 'call', playerId: activePlayer.id, timestamp: new Date() });
+
+    // Should auto-advance through flop, turn, river to showdown
+    state = controller.getState();
+
+    expect(state.currentStreet).toBe('showdown');
+    expect(state.communityCards.length).toBe(5);
+
+    // Should have advanced through all streets
+    expect(streetChanges).toContain('flop');
+    expect(streetChanges).toContain('turn');
+    expect(streetChanges).toContain('river');
+
+    console.log('=== PRE-FLOP ALL-IN TEST RESULTS ===');
+    console.log('Street progression:', streetChanges.join(' -> '));
+    console.log('Final street:', state.currentStreet);
+    console.log('Community cards:', state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' '));
+  });
+});
+
 describe('HandController - Complex Integration Tests', () => {
 
   /**

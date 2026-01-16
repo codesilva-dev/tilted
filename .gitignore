@@ -42,3 +42,5 @@ next-env.d.ts
 
 /src/generated/prisma
 prisma/migrations/migration_lock.toml
+
+CLAUDE.md

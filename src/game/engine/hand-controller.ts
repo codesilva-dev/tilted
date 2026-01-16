@@ -94,6 +94,7 @@ export class HandController {
         hasActed: false,
         status: 'waiting' as const,
         isWinner: false,
+        handRank: undefined,
         isLeaving: false
       }))
     };
@@ -258,6 +259,16 @@ export class HandController {
     this.state = this.setFirstActivePlayer(this.state);
 
     this.emit({ type: 'street-changed', table: this.state, street: this.state.currentStreet });
+
+    // If no active players can act but hand should continue (all-in scenario),
+    // automatically advance to the next street until we reach showdown
+    if (this.state.activePlayerPosition === null) {
+      const playersInHand = this.state.players.filter(p => isPlayerInHand(p));
+      if (playersInHand.length > 1) {
+        // No one can act but multiple players remain - continue advancing
+        await this.advanceStreet();
+      }
+    }
   }
 
   /**
@@ -300,6 +311,9 @@ export class HandController {
         currentBet: 0,
         totalBetInHand: 0,
         hasActed: false,
+        // Reset winner/hand info from previous hand
+        isWinner: undefined,
+        handRank: undefined,
         // Reset status: folded/sitting-out stay as is, others become waiting
         status: p.status === 'sitting-out' ? 'sitting-out' :
                 p.status === 'folded' ? 'waiting' :
