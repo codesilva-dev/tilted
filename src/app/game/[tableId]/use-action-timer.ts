@@ -18,6 +18,14 @@ export function useActionTimer({
   const hasTimedOutRef = useRef<boolean>(false);
   const lastActivePositionRef = useRef<number | null>(null);
 
+  // Use refs for values needed in interval callback to avoid stale closures
+  const isMyTurnRef = useRef(isMyTurn);
+  const onTimeoutRef = useRef(onTimeout);
+
+  // Keep refs updated
+  isMyTurnRef.current = isMyTurn;
+  onTimeoutRef.current = onTimeout;
+
   useEffect(() => {
     // Check if active player changed (new turn started)
     const turnChanged = activePlayerPosition !== lastActivePositionRef.current;
@@ -43,10 +51,10 @@ export function useActionTimer({
           const newTime = prev - 1;
 
           // Trigger timeout action when timer hits 0 (only if it's MY turn)
-          if (newTime <= 0 && !hasTimedOutRef.current && isMyTurn) {
+          if (newTime <= 0 && !hasTimedOutRef.current && isMyTurnRef.current) {
             hasTimedOutRef.current = true;
             clearInterval(intervalRef.current!);
-            onTimeout();
+            onTimeoutRef.current();
             return 0;
           }
 
@@ -69,7 +77,7 @@ export function useActionTimer({
       setTimeRemaining(timeLimit);
       hasTimedOutRef.current = false;
     }
-  }, [activePlayerPosition, isMyTurn, timeLimit, onTimeout]);
+  }, [activePlayerPosition, timeLimit]);
 
   return { timeRemaining };
 }
