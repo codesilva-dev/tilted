@@ -210,36 +210,43 @@ function createQuickplayTable() {
  */
 function setupControllerEventHandlers(controller: HandController, tableId: string): void {
   controller.on((event: HandEvent) => {
+    // Create log prefix with hand number for context
+    const handNum = event.table.handNumber;
+    const prefix = `[Event][Hand #${handNum}][${tableId}]`;
+
     switch (event.type) {
       case 'hand-started':
         io.to(tableId).emit('hand-started', { table: event.table });
-        log(`[Event] Hand started at table ${tableId}`);
+        log(`${prefix} HAND STARTED - ${event.table.players.length} players`);
         break;
 
       case 'blinds-posted':
         io.to(tableId).emit('blinds-posted', { table: event.table });
-        log(`[Event] Blinds posted at table ${tableId}`);
+        log(`${prefix} Blinds posted: pot=${event.table.pot}`);
         break;
 
       case 'cards-dealt':
         io.to(tableId).emit('cards-dealt', { table: event.table });
-        log(`[Event] Cards dealt at table ${tableId}`);
+        log(`${prefix} Cards dealt to ${event.table.players.length} players`);
         break;
 
       case 'action-processed':
+        const actor = event.table.players.find(p => p.id === event.action.playerId);
+        const actorName = actor?.name || event.action.playerId;
         io.to(tableId).emit('action-processed', {
           table: event.table,
           action: event.action
         });
-        log(`[Event] Action processed at table ${tableId}: ${event.action.type}`);
+        log(`${prefix} ACTION: ${actorName} ${event.action.type}${event.action.amount ? ` ${event.action.amount}` : ''} | pot=${event.table.pot}`);
         break;
 
       case 'street-changed':
+        const communityCards = event.table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
         io.to(tableId).emit('street-changed', {
           table: event.table,
           street: event.street
         });
-        log(`[Event] Street changed to ${event.street} at table ${tableId}`);
+        log(`${prefix} STREET -> ${event.street.toUpperCase()} | board=[${communityCards}] pot=${event.table.pot}`);
         break;
 
       case 'hand-completed':
@@ -248,7 +255,8 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
           result: event.result
         });
         io.to(tableId).emit('game-state', { table: event.table });
-        log(`[Event] Hand completed at table ${tableId}`);
+        const winners = event.table.players.filter(p => p.isWinner).map(p => p.name);
+        log(`${prefix} HAND COMPLETE - Winners: [${winners.join(', ')}] | Distributed: ${event.result.totalDistributed}`);
         // Leaving players will be removed when startHand is called after the countdown
         break;
 
@@ -260,21 +268,20 @@ function setupControllerEventHandlers(controller: HandController, tableId: strin
             roomForRemoval.seatedPlayers.delete(player.id);
             // Move to spectators so they can sit again
             roomForRemoval.spectators.set(player.id, { id: player.id, name: player.name });
-            log(`[Event] Player ${player.name} moved to spectators`);
           }
         }
 
         // Broadcast updated game state
         io.to(tableId).emit('game-state', { table: event.table });
         io.to(tableId).emit('players-removed', { playerIds: event.removedPlayers.map(p => p.id) });
-        log(`[Event] Removed ${event.removedPlayers.length} players from table ${tableId}`);
+        log(`${prefix} PLAYERS REMOVED: [${event.removedPlayers.map(p => p.name).join(', ')}]`);
         break;
 
       case 'error':
         io.to(tableId).emit('game-error', {
           message: event.error.message
         });
-        console.error(`[Error] at table ${tableId}:`, event.error.message);
+        console.error(`${prefix} ERROR: ${event.error.message}`);
         break;
     }
   });
@@ -747,14 +754,20 @@ io.on('connection', (socket: Socket) => {
 
       // Check if a hand is already in progress (prevent duplicate startHand calls)
       const currentState = room.controller.getState();
+      const currentHandNum = currentState.handNumber;
+      const prefix = `[Socket][Hand #${currentHandNum}][${tableId}]`;
+
       const isActiveStreet = currentState.currentStreet !== 'showdown' && currentState.currentStreet !== 'pre-flop';
       const isPreflopWithAction = currentState.currentStreet === 'pre-flop' && currentState.activePlayerPosition !== null;
       const handInProgress = isActiveStreet || isPreflopWithAction;
 
       if (handInProgress) {
-        log(`[Start Hand] Hand already in progress at table ${tableId}, ignoring duplicate call`);
+        log(`${prefix} Start hand IGNORED - hand already in progress (street=${currentState.currentStreet}, activePos=${currentState.activePlayerPosition})`);
         return;
       }
+
+      log(`${prefix} Start hand request received`);
+      log(`${prefix}   Current players: ${currentState.players.map(p => `${p.name}(stack:${p.stack})`).join(', ')}`);
 
       // First, cleanup any leaving players
       const leavingPlayers = room.controller.removeLeavingPlayers();
@@ -763,8 +776,8 @@ io.on('connection', (socket: Socket) => {
         for (const player of leavingPlayers) {
           room.seatedPlayers.delete(player.id);
           room.spectators.set(player.id, { id: player.id, name: player.name });
-          log(`[Start Hand] Player ${player.name} removed and moved to spectators`);
         }
+        log(`${prefix} Removed leaving players: [${leavingPlayers.map(p => p.name).join(', ')}]`);
         io.to(tableId).emit('players-removed', { playerIds: leavingPlayers.map(p => p.id) });
       }
 
@@ -775,7 +788,7 @@ io.on('connection', (socket: Socket) => {
 
       if (activePlayers.length < 2) {
         // Not enough players - just reset to waiting state, don't try to start
-        log(`[Start Hand] Not enough active players with chips (${activePlayers.length}) - resetting to waiting`);
+        log(`${prefix} Not enough active players (${activePlayers.length}) - resetting to waiting`);
         room.controller.resetToWaiting();
         const updatedState = room.controller.getState();
         io.to(tableId).emit('game-state', { table: updatedState });
@@ -783,7 +796,7 @@ io.on('connection', (socket: Socket) => {
       }
 
       // Enough players - start the hand
-      log(`[Start Hand] Starting hand at table ${tableId}`);
+      log(`${prefix} Starting new hand with ${activePlayers.length} players: [${activePlayers.map(p => `${p.name}(${p.stack})`).join(', ')}]`);
       await room.controller.startHand();
 
     } catch (error) {
@@ -799,7 +812,7 @@ io.on('connection', (socket: Socket) => {
           room.controller.resetToWaiting();
           const updatedState = room.controller.getState();
           io.to(tableId).emit('game-state', { table: updatedState });
-          log(`[Start Hand] Table ${tableId} reset to waiting state (not enough players)`);
+          log(`[Socket][${tableId}] Table reset to waiting state (not enough players)`);
         }
       } else {
         socket.emit('action-error', { message: errorMessage });
@@ -819,14 +832,22 @@ io.on('connection', (socket: Socket) => {
         throw new Error('Table not found');
       }
 
-      log(`[Action] Player ${action.playerId} at table ${tableId}: ${action.type}${action.amount ? ` ${action.amount}` : ''}`);
+      const state = room.controller.getState();
+      const handNum = state.handNumber;
+      const player = state.players.find(p => p.id === action.playerId);
+      const playerName = player?.name || action.playerId;
+      const prefix = `[Socket][Hand #${handNum}][${tableId}]`;
+
+      log(`${prefix} Received action from ${playerName}: ${action.type}${action.amount ? ` ${action.amount}` : ''}`);
+      log(`${prefix}   Current state: street=${state.currentStreet}, pot=${state.pot}, activePos=${state.activePlayerPosition}`);
 
       await room.controller.handleAction(action);
 
     } catch (error) {
-      console.error('[Action Error]', error);
+      const errorMessage = error instanceof Error ? error.message : 'Invalid action';
+      console.error('[Action Error]', errorMessage, error);
       socket.emit('action-error', {
-        message: error instanceof Error ? error.message : 'Invalid action',
+        message: errorMessage,
         action: data.action
       });
     }

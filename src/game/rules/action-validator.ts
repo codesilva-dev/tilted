@@ -6,6 +6,11 @@ import { TableState, GameAction, ActionType, BettingLimits } from "../types/game
  * This is part of the Rules layer (Layer 2/3)
  */
 
+// Helper to create consistent log prefix
+function logPrefix(state: TableState): string {
+  return `[ActionValidator][Hand #${state.handNumber}][${state.id}]`;
+}
+
 /**
  * Validates if a specific action is allowed for a player.
  * Returns { valid: true } if allowed, or { valid: false, error: "reason" } if not.
@@ -15,46 +20,77 @@ export function validateAction(
   playerId: string,
   action: GameAction
 ): { valid: boolean; error?: string } {
+  const prefix = logPrefix(state);
   const player = state.players.find(p => p.id === playerId);
+  const playerName = player?.name || playerId;
+
+  // No actions allowed during showdown - hand is complete
+  if (state.currentStreet === 'showdown') {
+    console.log(`${prefix} REJECTED ${playerName} ${action.type}: Hand is complete (street=showdown)`);
+    return { valid: false, error: 'Hand is complete - no actions allowed' };
+  }
 
   // Player must exist
   if (!player) {
+    console.log(`${prefix} REJECTED ${playerId} ${action.type}: Player not found`);
+    console.log(`${prefix}   Known players: [${state.players.map(p => `${p.name}(${p.id})`).join(', ')}]`);
     return { valid: false, error: 'Player not found' };
   }
 
   // Must be player's turn
   if (state.activePlayerPosition !== player.seatPosition) {
+    const activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition);
+    console.log(`${prefix} REJECTED ${playerName} ${action.type}: Not their turn`);
+    console.log(`${prefix}   Active position: ${state.activePlayerPosition} (${activePlayer?.name || 'none'})`);
+    console.log(`${prefix}   Player position: ${player.seatPosition}`);
     return { valid: false, error: 'Not your turn' };
   }
 
   // Player must be active
   if (player.status !== 'active') {
+    console.log(`${prefix} REJECTED ${playerName} ${action.type}: Player status is '${player.status}' (not active)`);
     return { valid: false, error: 'Player is not active' };
   }
 
   // Validate specific action type
+  let result: { valid: boolean; error?: string };
+
   switch (action.type) {
     case 'fold':
-      return validateFold(state, player);
+      result = validateFold(state, player);
+      break;
 
     case 'check':
-      return validateCheck(state, player);
+      result = validateCheck(state, player);
+      break;
 
     case 'call':
-      return validateCall(state, player);
+      result = validateCall(state, player);
+      break;
 
     case 'bet':
-      return validateBet(state, player, action.amount);
+      result = validateBet(state, player, action.amount);
+      break;
 
     case 'raise':
-      return validateRaise(state, player, action.amount);
+      result = validateRaise(state, player, action.amount);
+      break;
 
     case 'all-in':
-      return validateAllIn(state, player);
+      result = validateAllIn(state, player);
+      break;
 
     default:
-      return { valid: false, error: 'Invalid action type' };
+      result = { valid: false, error: 'Invalid action type' };
   }
+
+  if (!result.valid) {
+    console.log(`${prefix} REJECTED ${playerName} ${action.type}${action.amount ? ` ${action.amount}` : ''}: ${result.error}`);
+    console.log(`${prefix}   State: street=${state.currentStreet}, pot=${state.pot}, currentBet=${state.currentBet}`);
+    console.log(`${prefix}   Player: status=${player.status}, currentBet=${player.currentBet}, stack=${player.stack}`);
+  }
+
+  return result;
 }
 
 /**

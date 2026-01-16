@@ -1,4 +1,4 @@
-import { TableState, GameAction, Street, HandResult, isPlayerInHand, getNextOccupiedPosition } from "../types/game-state";
+import { TableState, GameAction, Street, HandResult, isPlayerInHand, getNextOccupiedPosition, Player } from "../types/game-state";
 import { createDeck, shuffleDeck } from "../core/cards";
 import {
   postBlinds,
@@ -11,6 +11,16 @@ import {
 } from "../state/game-manager";
 import { validateAction } from "../rules/action-validator";
 import { distributePots, shouldEndHandByFold, endHandByFold, shouldGoToShowdown } from "./pot-manager";
+
+// Helper to create consistent log prefix
+function logPrefix(state: TableState): string {
+  return `[HandController][Hand #${state.handNumber}][${state.id}]`;
+}
+
+// Helper to format player state for logging
+function formatPlayerState(p: Player): string {
+  return `${p.name}(${p.status}, bet:${p.currentBet}/${p.totalBetInHand}, stack:${p.stack})`;
+}
 
 /**
  * Event types emitted by HandController
@@ -84,6 +94,17 @@ export class HandController {
   }
 
   /**
+   * Remove all busted players (stack = 0)
+   * Returns the removed player info (id and name) for cleanup
+   */
+  removeBustedPlayers(): Array<{ id: string; name: string }> {
+    const bustedPlayers = this.state.players.filter(p => p.stack === 0);
+    const bustedPlayerInfo = bustedPlayers.map(p => ({ id: p.id, name: p.name }));
+    this.state.players = this.state.players.filter(p => p.stack > 0);
+    return bustedPlayerInfo;
+  }
+
+  /**
    * Reset the table to a waiting state (between hands)
    * Called when there aren't enough players to start a new hand
    */
@@ -136,26 +157,41 @@ export class HandController {
    * 7. Deal hole cards
    */
   async startHand(): Promise<TableState> {
+    const nextHandNum = this.state.handNumber + 1;
+    console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ╔════════════════════════════════════════════════════════════╗`);
+    console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ║                    STARTING NEW HAND                       ║`);
+    console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ╚════════════════════════════════════════════════════════════╝`);
+
     try {
       // 1. Remove players who were waiting to leave
       const leavingPlayers = this.removeLeavingPlayers();
       if (leavingPlayers.length > 0) {
-        console.log(`[HandController] Removed ${leavingPlayers.length} leaving players before starting new hand`);
+        console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] Removed ${leavingPlayers.length} leaving players: [${leavingPlayers.map(p => p.name).join(', ')}]`);
         this.emit({ type: 'players-removed', table: this.state, removedPlayers: leavingPlayers });
       }
 
       // 2. Check if we have enough players
+      console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] Players at table: ${this.state.players.length}`);
+      this.state.players.forEach((p, i) => {
+        console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}]   [${i}] ${formatPlayerState(p)}`);
+      });
+
       if (this.state.players.length < 2) {
+        console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ERROR: Not enough players (${this.state.players.length})`);
         throw new Error('Need at least 2 players to start a hand');
       }
 
       // 3. Reset player states for new hand
       this.state = this.resetForNewHand(this.state);
+      const prefix = logPrefix(this.state);
+
+      console.log(`${prefix} Player states reset for new hand`);
 
       this.emit({ type: 'hand-started', table: this.state });
 
       // 4. Advance dealer button (find next occupied seat)
       this.state = this.advanceDealerButton(this.state);
+      console.log(`${prefix} Positions: Dealer=${this.state.dealerPosition}, SB=${this.state.smallBlindPosition}, BB=${this.state.bigBlindPosition}`);
 
       // 5. Shuffle and reset deck
       this.state = {
@@ -164,22 +200,36 @@ export class HandController {
         communityCards: [],
         currentStreet: 'pre-flop'
       };
+      console.log(`${prefix} Deck shuffled (${this.state.deck.length} cards)`);
 
       // 6. Post blinds
       this.state = postBlinds(this.state);
+      console.log(`${prefix} Blinds posted: SB=${this.state.smallBlind}, BB=${this.state.bigBlind}, pot=${this.state.pot}`);
       this.emit({ type: 'blinds-posted', table: this.state });
 
       // 7. Deal hole cards
       this.state = dealHoleCards(this.state);
+      console.log(`${prefix} Hole cards dealt:`);
+      this.state.players.forEach(p => {
+        const cards = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
+        console.log(`${prefix}   ${p.name}: [${cards}]`);
+      });
 
       // 8. Set first active player (after big blind)
       this.state = this.setFirstActivePlayer(this.state);
+      const activePlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);
+      console.log(`${prefix} First to act: ${activePlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
 
       this.emit({ type: 'cards-dealt', table: this.state });
+
+      console.log(`${prefix} ════════════════════════════════════════════════════════════`);
+      console.log(`${prefix} Hand #${this.state.handNumber} started successfully`);
+      console.log(`${prefix} ════════════════════════════════════════════════════════════`);
 
       return this.getState();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+      console.error(`[HandController][Hand #${nextHandNum}][${this.state.id}] ERROR starting hand: ${err.message}`);
       // Don't emit error event for "not enough players" - it's expected when players leave or bust
       // The server will handle this gracefully by resetting to waiting state
       const isPlayerCountError = err.message.includes('at least 2') && err.message.includes('players');
@@ -198,19 +248,45 @@ export class HandController {
    * 4. If complete, advance to next street or showdown
    */
   async handleAction(action: GameAction): Promise<TableState> {
+    const prefix = logPrefix(this.state);
+    const player = this.state.players.find(p => p.id === action.playerId);
+    const playerName = player?.name || action.playerId;
+
+    console.log(`${prefix} ──── ACTION: ${playerName} ${action.type}${action.amount ? ` ${action.amount}` : ''} ────`);
+    console.log(`${prefix} Street: ${this.state.currentStreet}, Pot: ${this.state.pot}, CurrentBet: ${this.state.currentBet}`);
+
+    if (player) {
+      console.log(`${prefix} Player state before: ${formatPlayerState(player)}`);
+    } else {
+      console.error(`${prefix} ERROR: Player ${action.playerId} not found!`);
+    }
+
     try {
       // 1. Validate action
       const validation = validateAction(this.state, action.playerId, action);
       if (!validation.valid) {
+        console.log(`${prefix} Action REJECTED: ${validation.error}`);
+        console.log(`${prefix}   Expected active position: ${this.state.activePlayerPosition}`);
+        console.log(`${prefix}   Player position: ${player?.seatPosition}`);
+        console.log(`${prefix}   Player status: ${player?.status}`);
         throw new Error(validation.error || 'Invalid action');
       }
+      console.log(`${prefix} Action VALIDATED`);
 
       // 2. Process action and update state
       this.state = processAction(this.state, action);
+
+      const playerAfter = this.state.players.find(p => p.id === action.playerId);
+      if (playerAfter) {
+        console.log(`${prefix} Player state after: ${formatPlayerState(playerAfter)}`);
+      }
+      console.log(`${prefix} State after: Pot=${this.state.pot}, CurrentBet=${this.state.currentBet}, ActivePos=${this.state.activePlayerPosition}`);
+
       this.emit({ type: 'action-processed', table: this.state, action });
 
       // 3. Check if hand ended by fold
       if (shouldEndHandByFold(this.state)) {
+        console.log(`${prefix} Hand ending by fold (only 1 player remaining)`);
         const { table, result } = endHandByFold(this.state);
         this.state = table;
         this.emit({ type: 'hand-completed', table: this.state, result });
@@ -218,13 +294,20 @@ export class HandController {
       }
 
       // 4. Check if betting round is complete
-      if (isBettingRoundComplete(this.state)) {
+      const bettingComplete = isBettingRoundComplete(this.state);
+      console.log(`${prefix} Betting round complete: ${bettingComplete}`);
+
+      if (bettingComplete) {
         await this.advanceStreet();
+      } else {
+        const nextPlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);
+        console.log(`${prefix} Next to act: ${nextPlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
       }
 
       return this.getState();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+      console.error(`${prefix} ERROR processing action: ${err.message}`);
       this.emit({ type: 'error', error: err });
       throw err;
     }
@@ -237,10 +320,15 @@ export class HandController {
    * 3. If river completed, go to showdown
    */
   private async advanceStreet(): Promise<void> {
+    const prefix = logPrefix(this.state);
     const currentStreet = this.state.currentStreet;
+
+    console.log(`${prefix} ═══════════════════════════════════════════════════════════`);
+    console.log(`${prefix} ADVANCING STREET from ${currentStreet}`);
 
     // Check if we should go to showdown
     if (shouldGoToShowdown(this.state)) {
+      console.log(`${prefix} -> Going to showdown (river complete, multiple players)`);
       await this.showdown();
       return;
     }
@@ -249,23 +337,36 @@ export class HandController {
     switch (currentStreet) {
       case 'pre-flop':
         this.state = dealFlop(this.state);
+        console.log(`${prefix} -> FLOP dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
         break;
       case 'flop':
         this.state = dealTurn(this.state);
+        console.log(`${prefix} -> TURN dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
         break;
       case 'turn':
         this.state = dealRiver(this.state);
+        console.log(`${prefix} -> RIVER dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
         break;
       case 'river':
         // After river, go to showdown
+        console.log(`${prefix} -> River complete, going to showdown`);
         await this.showdown();
         return;
       default:
+        console.error(`${prefix} ERROR: Cannot advance from street: ${currentStreet}`);
         throw new Error(`Cannot advance from street: ${currentStreet}`);
     }
 
+    // Log player states at start of new street
+    console.log(`${prefix} Player states at ${this.state.currentStreet}:`);
+    this.state.players.forEach(p => {
+      console.log(`${prefix}   ${formatPlayerState(p)}`);
+    });
+
     // Set first active player for new street
     this.state = this.setFirstActivePlayer(this.state);
+    const activePlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);
+    console.log(`${prefix} First to act: ${activePlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
 
     this.emit({ type: 'street-changed', table: this.state, street: this.state.currentStreet });
 
@@ -273,8 +374,10 @@ export class HandController {
     // automatically advance to the next street until we reach showdown
     if (this.state.activePlayerPosition === null) {
       const playersInHand = this.state.players.filter(p => isPlayerInHand(p));
+      console.log(`${prefix} No active player - ${playersInHand.length} players still in hand`);
       if (playersInHand.length > 1) {
         // No one can act but multiple players remain - continue advancing
+        console.log(`${prefix} All-in scenario - auto-advancing to next street`);
         await this.advanceStreet();
       }
     }
@@ -288,6 +391,21 @@ export class HandController {
    * 4. Remove any players marked as leaving
    */
   private async showdown(): Promise<void> {
+    const prefix = logPrefix(this.state);
+
+    console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+    console.log(`${prefix} ║                       SHOWDOWN                             ║`);
+    console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+    console.log(`${prefix} Community: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+    console.log(`${prefix} Pot: ${this.state.pot}`);
+    console.log(`${prefix} Players going to showdown:`);
+    this.state.players.forEach(p => {
+      const inHand = isPlayerInHand(p);
+      const cards = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
+      const marker = inHand ? '→' : ' ';
+      console.log(`${prefix} ${marker} ${p.name}: [${cards}] (${p.status}, bet:${p.totalBetInHand}, stack:${p.stack})`);
+    });
+
     // Update street to showdown
     this.state = {
       ...this.state,
@@ -297,6 +415,10 @@ export class HandController {
     // Distribute pots and get result
     const { table, result } = distributePots(this.state);
     this.state = table;
+
+    console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+    console.log(`${prefix} ║                  HAND #${this.state.handNumber} COMPLETE                        ║`);
+    console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
 
     this.emit({ type: 'hand-completed', table: this.state, result });
   }
