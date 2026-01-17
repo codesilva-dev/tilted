@@ -16,6 +16,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:verbose": "jest --verbose",
+    "test:v2": "jest src/game-v2 --verbose",
     "test:socket": "ts-node src/server/test-client.ts"
   },
   "dependencies": {
