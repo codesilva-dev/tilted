@@ -295,20 +295,28 @@ export function distributePots(table: TableState): { table: TableState; result: 
   console.log(`${prefix} Processing ${pots.length} pot(s)...`);
   for (let i = 0; i < pots.length; i++) {
     const pot = pots[i];
-    console.log(`${prefix} === Pot ${i + 1}/${pots.length}: ${pot.type} (${pot.amount} chips) ===`);
+    const isContestedPot = pot.eligiblePlayers.length >= 2;
+    const potLabel = isContestedPot ? pot.type : `${pot.type} (refund)`;
+    console.log(`${prefix} === Pot ${i + 1}/${pots.length}: ${potLabel} (${pot.amount} chips) ===`);
 
     const potResult = determineWinnersForPot(pot, table.players, table.communityCards, table);
     potResults.push(potResult);
 
     // Award winnings and mark winners
+    // Only mark as "winner" if they won a contested pot (2+ eligible players)
+    // Uncontested pots (1 eligible) are just refunds of uncalled bets
     for (const winner of potResult.winners) {
       const player = table.players.find(p => p.id === winner.playerId);
       if (player) {
         const oldStack = player.stack;
         player.stack += winner.amountWon;
-        console.log(`${prefix} AWARD: ${player.name} +${winner.amountWon} (${oldStack} -> ${player.stack})`);
+        const actionLabel = isContestedPot ? 'AWARD' : 'REFUND';
+        console.log(`${prefix} ${actionLabel}: ${player.name} +${winner.amountWon} (${oldStack} -> ${player.stack})`);
         totalDistributed += winner.amountWon;
-        winnerIds.add(winner.playerId);
+        // Only mark as winner if they won a contested pot
+        if (isContestedPot) {
+          winnerIds.add(winner.playerId);
+        }
       } else {
         console.error(`${prefix} ERROR: Winner ${winner.playerId} not found in players!`);
       }
@@ -330,10 +338,11 @@ export function distributePots(table: TableState): { table: TableState; result: 
   console.log(`${prefix} ════════════════════════════════════════════════════════════`);
   console.log(`${prefix} DISTRIBUTION SUMMARY:`);
   console.log(`${prefix}   Total distributed: ${totalDistributed} chips`);
-  console.log(`${prefix}   Winners: [${Array.from(winnerIds).map(id => {
+  const actualWinners = Array.from(winnerIds).map(id => {
     const p = table.players.find(pl => pl.id === id);
     return p ? p.name : id;
-  }).join(', ')}]`);
+  });
+  console.log(`${prefix}   Actual winners: [${actualWinners.length > 0 ? actualWinners.join(', ') : 'none (all refunds)'}]`);
   console.log(`${prefix} Final stacks:`);
   table.players.forEach(p => {
     const marker = p.isWinner ? ' ★ WINNER' : '';
