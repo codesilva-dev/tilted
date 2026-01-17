@@ -9,6 +9,23 @@ import CreateTableModal, { TableConfig } from '@/components/poker/CreateTableMod
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 
+// Ping the server's HTTP health endpoint to prevent Render spin-down
+function startHttpKeepAlive(url: string): () => void {
+  const healthUrl = url.replace(/\/$/, '') + '/health';
+
+  const ping = () => {
+    fetch(healthUrl, { method: 'GET', mode: 'cors' })
+      .then(res => console.log('[KeepAlive] Health ping:', res.status))
+      .catch(err => console.log('[KeepAlive] Health ping failed:', err.message));
+  };
+
+  // Ping immediately, then every 5 minutes
+  ping();
+  const interval = setInterval(ping, 5 * 60 * 1000);
+
+  return () => clearInterval(interval);
+}
+
 interface TableInfo {
   tableId: string;
   name: string;
@@ -32,9 +49,13 @@ export default function LobbyPage() {
   const [filter, setFilter] = useState<'all' | 'active' | 'waiting' | 'quickplay'>('all');
 
   useEffect(() => {
+    // Start HTTP keep-alive to prevent Render from spinning down
+    const stopKeepAlive = startHttpKeepAlive(SOCKET_URL);
+
     const socketInstance = io(SOCKET_URL, {
-      transports: ['websocket'],
-      reconnection: true
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10
     });
 
     setSocket(socketInstance);
@@ -86,6 +107,7 @@ export default function LobbyPage() {
 
     return () => {
       clearInterval(interval);
+      stopKeepAlive();
       socketInstance.disconnect();
     };
   }, [router]);

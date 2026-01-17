@@ -92,6 +92,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     isSeated,
     availableSeats,
     error,
+    tableNotFound,
     takeSeat,
     leaveSeat,
     leaveRoom,
@@ -102,6 +103,16 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     playerId,
     playerName
   });
+
+  // Auto-redirect to lobby when table no longer exists (server restarted)
+  useEffect(() => {
+    if (tableNotFound) {
+      const timer = setTimeout(() => {
+        router.push('/lobby');
+      }, 3000); // Give user 3 seconds to read the message
+      return () => clearTimeout(timer);
+    }
+  }, [tableNotFound, router]);
 
   // Calculate derived state (safe with optional chaining)
   const currentPlayer = gameState?.players.find(p => p.id === playerId);
@@ -155,12 +166,12 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     }
   }, [gameState, currentPlayer, isMyTurn, takeAction, playerId]);
 
-  // Action timer - 30 seconds to act (runs for all players to see the countdown)
+  // Action timer - 25 seconds to act (runs for all players to see the countdown)
   const { timeRemaining } = useActionTimer({
     isMyTurn: isMyTurn || false,
     activePlayerPosition: gameState?.activePlayerPosition ?? null,
     onTimeout: handleTimeout,
-    timeLimit: 30
+    timeLimit: 25
   });
 
   // Calculate betting constraints
@@ -334,19 +345,23 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   }
 
   if (error) {
-    const isTableNotFound = error.toLowerCase().includes('table not found');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
         <div className="text-center">
-          <div className="text-red-500 text-6xl mb-4">{isTableNotFound ? '🔍' : '⚠️'}</div>
+          <div className="text-red-500 text-6xl mb-4">{tableNotFound ? '🔍' : '⚠️'}</div>
           <h1 className="text-2xl font-bold mb-2">
-            {isTableNotFound ? 'Table Not Found' : 'Connection Error'}
+            {tableNotFound ? 'Table Not Found' : 'Connection Error'}
           </h1>
-          <p className="text-gray-400 mb-6">
-            {isTableNotFound
-              ? 'This table no longer exists. It may have been deleted after a server restart.'
+          <p className="text-gray-400 mb-4">
+            {tableNotFound
+              ? 'This table no longer exists. The server may have restarted.'
               : error}
           </p>
+          {tableNotFound && (
+            <p className="text-blue-400 mb-4 animate-pulse">
+              Redirecting to lobby in 3 seconds...
+            </p>
+          )}
           <Link
             href="/lobby"
             className="inline-block bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg transition-colors"

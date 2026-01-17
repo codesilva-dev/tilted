@@ -6,6 +6,24 @@ import { TableState, GameAction } from '@/game/types/game-state';
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 
+// Ping the server's HTTP health endpoint every 5 minutes to prevent Render spin-down
+// Render free tier spins down after 15 mins of no HTTP activity (WebSocket doesn't count)
+function startHttpKeepAlive(url: string): () => void {
+  const healthUrl = url.replace(/\/$/, '') + '/health';
+
+  const ping = () => {
+    fetch(healthUrl, { method: 'GET', mode: 'cors' })
+      .then(res => console.log('[KeepAlive] Health ping:', res.status))
+      .catch(err => console.log('[KeepAlive] Health ping failed:', err.message));
+  };
+
+  // Ping immediately, then every 5 minutes
+  ping();
+  const interval = setInterval(ping, 5 * 60 * 1000);
+
+  return () => clearInterval(interval);
+}
+
 interface UseGameSocketOptions {
   tableId: string;
   playerId: string;
@@ -18,6 +36,7 @@ interface UseGameSocketReturn {
   isSeated: boolean;
   availableSeats: number[];
   error: string | null;
+  tableNotFound: boolean; // True when server restarted and table is gone
   joinRoom: () => void;
   takeSeat: (seatPosition: number, buyIn: number) => void;
   leaveSeat: () => void;
@@ -35,11 +54,15 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
   const [isSeated, setIsSeated] = useState<boolean>(false);
   const [availableSeats, setAvailableSeats] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [tableNotFound, setTableNotFound] = useState<boolean>(false);
 
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     console.log('[Socket] Connecting to', SOCKET_URL);
+
+    // Start HTTP keep-alive to prevent Render from spinning down
+    const stopKeepAlive = startHttpKeepAlive(SOCKET_URL);
 
     const socket = io(SOCKET_URL, {
       // Allow both transports with websocket preferred - polling is fallback if websocket fails
@@ -177,7 +200,13 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     // Error handlers
     socket.on('join-room-error', (data: { message: string }) => {
       console.error('[Socket] Join room error:', data.message);
-      setError(`Failed to join: ${data.message}`);
+      // If table not found after reconnect, server may have restarted
+      if (data.message.includes('Table not found')) {
+        setTableNotFound(true);
+        setError('Table no longer exists. The server may have restarted.');
+      } else {
+        setError(`Failed to join: ${data.message}`);
+      }
     });
 
     socket.on('take-seat-error', (data: { message: string }) => {
@@ -205,6 +234,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
 
     return () => {
       console.log('[Socket] Cleaning up...');
+      stopKeepAlive();
       socket.disconnect();
     };
   }, [tableId, playerId, playerName]);
@@ -261,6 +291,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     isSeated,
     availableSeats,
     error,
+    tableNotFound,
     joinRoom,
     takeSeat,
     leaveSeat,

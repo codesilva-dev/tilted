@@ -363,6 +363,15 @@ export class HandController {
       console.log(`${prefix}   ${formatPlayerState(p)}`);
     });
 
+    // Check if betting round is already complete (e.g., only one active player, rest all-in)
+    // This must be checked BEFORE setting active player
+    if (isBettingRoundComplete(this.state)) {
+      console.log(`${prefix} Betting round already complete (all-in scenario) - auto-advancing`);
+      this.emit({ type: 'street-changed', table: this.state, street: this.state.currentStreet });
+      await this.advanceStreet();
+      return;
+    }
+
     // Set first active player for new street
     this.state = this.setFirstActivePlayer(this.state);
     const activePlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);

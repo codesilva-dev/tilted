@@ -988,11 +988,26 @@ io.on('connection', (socket: Socket) => {
 });
 
 /**
+ * Log memory usage periodically for diagnostics
+ */
+function logMemoryUsage(): void {
+  const used = process.memoryUsage();
+  const formatMB = (bytes: number) => Math.round(bytes / 1024 / 1024 * 100) / 100;
+  log(`[Memory] RSS: ${formatMB(used.rss)}MB, Heap: ${formatMB(used.heapUsed)}/${formatMB(used.heapTotal)}MB, Tables: ${gameRooms.size}, Uptime: ${Math.round(process.uptime())}s`);
+}
+
+// Log memory every 60 seconds to help diagnose Render restarts
+setInterval(logMemoryUsage, 60000);
+
+/**
  * Start the server
  */
 httpServer.listen(PORT, () => {
   // Create quickplay table
   createQuickplayTable();
+
+  // Log initial memory usage
+  logMemoryUsage();
 
   log(`
 ╔═══════════════════════════════════════════════════════╗

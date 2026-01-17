@@ -288,6 +288,16 @@ export function isBettingRoundComplete(table: TableState): boolean {
     return true;
   }
 
+  // If only one active player and all others are all-in, betting is complete
+  // (there's no one who can respond to a bet, so no point in asking for action)
+  if (activePlayers.length === 1) {
+    const allInPlayers = table.players.filter(p => p.status === 'all-in');
+    if (allInPlayers.length > 0 && activePlayers.length + allInPlayers.length === playersInHand.length) {
+      // Only one active player, rest are all-in - no betting action needed
+      return true;
+    }
+  }
+
   // All active players must have acted
   if (activePlayers.some(p => !p.hasActed)) {
     return false;
