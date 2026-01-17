@@ -98,6 +98,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     availableSeats,
     error,
     tableNotFound,
+    tableResetCountdown,
     takeSeat,
     leaveSeat,
     leaveRoom,
@@ -571,6 +572,26 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
           </div>
         )}
 
+        {/* Table Reset Countdown Notice */}
+        {tableResetCountdown !== null && (
+          <div className="bg-orange-900/50 border border-orange-500 rounded-lg p-4 mb-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">⏳</span>
+                <div>
+                  <h3 className="text-orange-400 font-bold">Table Resetting</h3>
+                  <p className="text-gray-300 text-sm">
+                    Not enough players. Table will reset in {tableResetCountdown} seconds...
+                  </p>
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-orange-400">
+                {tableResetCountdown}s
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Poker Table */}
         <div className="mb-8">
           <PokerTable
@@ -906,7 +927,8 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                   <span>Waiting for {activePlayer?.name || 'opponent'}...</span>
                 </div>
 
-                {/* Auto check/fold checkbox */}
+                {/* Auto check/fold checkbox - HIDDEN until fixed */}
+                {/* TODO: Re-enable when auto check/fold logic is fixed
                 <label className={`flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all ${
                   autoCheckFold
                     ? 'bg-blue-600/30 border border-blue-500/50'
@@ -925,6 +947,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                     (auto-check if possible, fold otherwise)
                   </span>
                 </label>
+                */}
               </div>
             )}
           </div>

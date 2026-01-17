@@ -37,6 +37,7 @@ interface UseGameSocketReturn {
   availableSeats: number[];
   error: string | null;
   tableNotFound: boolean; // True when server restarted and table is gone
+  tableResetCountdown: number | null; // Countdown in seconds before table resets
   joinRoom: () => void;
   takeSeat: (seatPosition: number, buyIn: number) => void;
   leaveSeat: () => void;
@@ -55,8 +56,10 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
   const [availableSeats, setAvailableSeats] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [tableNotFound, setTableNotFound] = useState<boolean>(false);
+  const [tableResetCountdown, setTableResetCountdown] = useState<number | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
+  const resetCountdownRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     console.log('[Socket] Connecting to', SOCKET_URL);
@@ -197,6 +200,38 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
       // Game state will be updated in the game-state event that follows
     });
 
+    // Table reset countdown (when not enough players after hand ends)
+    socket.on('table-resetting', (data: { countdown: number; reason: string }) => {
+      console.log('[Socket] Table resetting in', data.countdown, 'seconds:', data.reason);
+      setTableResetCountdown(data.countdown);
+
+      // Start client-side countdown
+      if (resetCountdownRef.current) {
+        clearInterval(resetCountdownRef.current);
+      }
+      resetCountdownRef.current = setInterval(() => {
+        setTableResetCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            if (resetCountdownRef.current) {
+              clearInterval(resetCountdownRef.current);
+              resetCountdownRef.current = null;
+            }
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    });
+
+    socket.on('table-reset-cancelled', () => {
+      console.log('[Socket] Table reset cancelled');
+      if (resetCountdownRef.current) {
+        clearInterval(resetCountdownRef.current);
+        resetCountdownRef.current = null;
+      }
+      setTableResetCountdown(null);
+    });
+
     // Error handlers
     socket.on('join-room-error', (data: { message: string }) => {
       console.error('[Socket] Join room error:', data.message);
@@ -235,6 +270,9 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     return () => {
       console.log('[Socket] Cleaning up...');
       stopKeepAlive();
+      if (resetCountdownRef.current) {
+        clearInterval(resetCountdownRef.current);
+      }
       socket.disconnect();
     };
   }, [tableId, playerId, playerName]);
@@ -292,6 +330,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     availableSeats,
     error,
     tableNotFound,
+    tableResetCountdown,
     joinRoom,
     takeSeat,
     leaveSeat,

@@ -59,6 +59,12 @@ const disconnectedPlayers = new Map<string, DisconnectedPlayer>();
 // Reconnection grace period in milliseconds (30 seconds)
 const RECONNECT_GRACE_PERIOD = 30000;
 
+// Table reset delay when not enough players (10 seconds)
+const TABLE_RESET_DELAY = 10000;
+
+// Track pending table resets (so we can cancel if a new player joins)
+const pendingTableResets = new Map<string, NodeJS.Timeout>();
+
 /**
  * Check if a player is disconnected (in grace period or marked as leaving)
  */
@@ -620,6 +626,15 @@ io.on('connection', (socket: Socket) => {
       room.spectators.delete(playerId);
       room.seatedPlayers.add(playerId);
 
+      // Cancel any pending table reset (new player joined)
+      const pendingReset = pendingTableResets.get(tableId);
+      if (pendingReset) {
+        clearTimeout(pendingReset);
+        pendingTableResets.delete(tableId);
+        log(`[Take Seat] Cancelled pending table reset - new player seated`);
+        io.to(tableId).emit('table-reset-cancelled', {});
+      }
+
       // Broadcast updated state
       io.to(tableId).emit('game-state', { table: state });
       io.to(tableId).emit('player-seated', {
@@ -666,19 +681,30 @@ io.on('connection', (socket: Socket) => {
       const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
       if (handInProgress) {
-        // Mid-hand: Fold and mark as leaving
-        if (player.status === 'active') {
-          log(`[Leave Seat] ${playerName} leaving mid-hand - folding and marking as leaving`);
+        // Mid-hand: Only fold if it's the player's turn, otherwise just mark as leaving
+        const isPlayersTurn = state.activePlayerPosition === player.seatPosition;
+
+        if (player.status === 'active' && isPlayersTurn) {
+          log(`[Leave Seat] ${playerName} leaving mid-hand (their turn) - folding and marking as leaving`);
           const foldAction: GameAction = {
             type: 'fold',
             playerId,
             timestamp: new Date()
           };
           await room.controller.handleAction(foldAction);
+        } else if (player.status === 'active') {
+          log(`[Leave Seat] ${playerName} leaving mid-hand (not their turn) - marking as leaving, will fold when turn comes`);
         }
 
-        // Mark player as leaving (will be removed at end of hand)
+        // Mark player as leaving (will be removed at end of hand, or folded when their turn comes)
         room.controller.markPlayerAsLeaving(playerId);
+
+        // If it wasn't the player's turn when they left, check if action has now come to them
+        // (edge case: another leaving player was before them and got folded)
+        // Also handles the case where the player who left is now next to act
+        if (!isPlayersTurn) {
+          await foldDisconnectedActivePlayers(room, tableId);
+        }
 
         // Get updated state after fold
         let updatedState = room.controller.getState();
@@ -792,19 +818,28 @@ io.on('connection', (socket: Socket) => {
         const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
         if (handInProgress) {
-          // Mid-hand: Fold and mark as leaving
-          if (player.status === 'active') {
-            log(`[Leave Room] ${player.name} leaving mid-hand - folding`);
+          // Mid-hand: Only fold if it's the player's turn
+          const isPlayersTurn = state.activePlayerPosition === player.seatPosition;
+
+          if (player.status === 'active' && isPlayersTurn) {
+            log(`[Leave Room] ${player.name} leaving mid-hand (their turn) - folding`);
             const foldAction: GameAction = {
               type: 'fold',
               playerId,
               timestamp: new Date()
             };
             await room.controller.handleAction(foldAction);
+          } else if (player.status === 'active') {
+            log(`[Leave Room] ${player.name} leaving mid-hand (not their turn) - will fold when turn comes`);
           }
 
           // Mark player as leaving (will be removed when next hand starts)
           room.controller.markPlayerAsLeaving(playerId);
+
+          // Auto-fold if action has come to this leaving player
+          if (!isPlayersTurn) {
+            await foldDisconnectedActivePlayers(room, tableId);
+          }
 
           log(`[Leave Room] ${player.name} marked as leaving, will be removed after hand`);
         } else {
@@ -955,6 +990,66 @@ io.on('connection', (socket: Socket) => {
       log(`${prefix}   Current state: street=${state.currentStreet}, pot=${state.pot}, activePos=${state.activePlayerPosition}`);
 
       await room.controller.handleAction(action);
+
+      // After action is processed, check if the next active player is leaving/disconnected
+      // If so, auto-fold them to keep the game moving
+      await foldDisconnectedActivePlayers(room, tableId);
+
+      // Check if hand just ended - if so, remove leaving players immediately
+      const updatedState = room.controller.getState();
+      if (updatedState.currentStreet === 'showdown') {
+        const leavingPlayers = room.controller.removeLeavingPlayers();
+        if (leavingPlayers.length > 0) {
+          for (const leavingPlayer of leavingPlayers) {
+            room.seatedPlayers.delete(leavingPlayer.id);
+            room.spectators.set(leavingPlayer.id, { id: leavingPlayer.id, name: leavingPlayer.name });
+          }
+          log(`[Socket][${tableId}] Removed leaving players after hand: [${leavingPlayers.map(p => p.name).join(', ')}]`);
+          io.to(tableId).emit('players-removed', { playerIds: leavingPlayers.map(p => p.id) });
+        }
+
+        // Check if not enough players remain - schedule reset to waiting state
+        const stateAfterRemoval = room.controller.getState();
+        const remainingPlayers = stateAfterRemoval.players.filter(p => p.stack > 0);
+        if (remainingPlayers.length < 2) {
+          log(`[Socket][${tableId}] Not enough players after removal (${remainingPlayers.length}) - scheduling reset in ${TABLE_RESET_DELAY / 1000}s`);
+
+          // Emit current state first (so clients see the final hand result)
+          io.to(tableId).emit('game-state', { table: stateAfterRemoval });
+
+          // Notify clients that table will reset soon
+          io.to(tableId).emit('table-resetting', {
+            countdown: TABLE_RESET_DELAY / 1000,
+            reason: 'Not enough players'
+          });
+
+          // Cancel any existing pending reset for this table
+          const existingReset = pendingTableResets.get(tableId);
+          if (existingReset) {
+            clearTimeout(existingReset);
+          }
+
+          // Schedule the reset
+          const resetTimeout = setTimeout(() => {
+            pendingTableResets.delete(tableId);
+            const currentRoom = gameRooms.get(tableId);
+            if (currentRoom) {
+              const currentState = currentRoom.controller.getState();
+              const currentPlayers = currentState.players.filter(p => p.stack > 0);
+              // Only reset if still not enough players
+              if (currentPlayers.length < 2) {
+                log(`[Socket][${tableId}] Resetting table to waiting state`);
+                currentRoom.controller.resetToWaiting();
+                io.to(tableId).emit('game-state', { table: currentRoom.controller.getState() });
+              }
+            }
+          }, TABLE_RESET_DELAY);
+
+          pendingTableResets.set(tableId, resetTimeout);
+        } else {
+          io.to(tableId).emit('game-state', { table: room.controller.getState() });
+        }
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Invalid action';

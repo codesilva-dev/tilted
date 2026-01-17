@@ -348,8 +348,8 @@ export default function PokerTable({
                   </div>
                 )}
 
-                {/* Show leaving indicator at showdown */}
-                {gameState.currentStreet === 'showdown' && player.isLeaving && (
+                {/* Show leaving indicator */}
+                {player.isLeaving && (
                   <div className="mt-1 text-xs font-semibold text-center text-orange-400">
                     ⚠️ Leaving
                   </div>
