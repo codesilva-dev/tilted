@@ -206,6 +206,30 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     router.push('/lobby');
   }, [leaveRoom, router]);
 
+  // Turn alert sound - plays when it becomes the player's turn
+  const prevIsMyTurnRef = useRef<boolean>(false);
+  const turnAlertRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    // Create audio element for turn alert
+    turnAlertRef.current = new Audio('/turn-alert.mp3');
+    turnAlertRef.current.volume = 0.5;
+
+    return () => {
+      turnAlertRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Play sound when it becomes the player's turn
+    if (isMyTurn && !prevIsMyTurnRef.current && currentPlayer?.status === 'active') {
+      turnAlertRef.current?.play().catch(() => {
+        // Ignore autoplay errors - browsers may block until user interaction
+      });
+    }
+    prevIsMyTurnRef.current = isMyTurn || false;
+  }, [isMyTurn, currentPlayer?.status]);
+
   // Track game state changes for the log
   const prevStreetRef = useRef<string | null>(null);
   const prevActivePlayerRef = useRef<number | null>(null);
