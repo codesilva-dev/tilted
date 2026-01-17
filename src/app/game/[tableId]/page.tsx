@@ -832,124 +832,159 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
               </div>
             )}
 
-            {/* Player's turn - compact action buttons */}
-            {isSeated && isMyTurn && currentPlayer?.status === 'active' && gameState.currentStreet !== 'showdown' && (() => {
+            {/* Action buttons - always visible when seated in active hand */}
+            {isSeated && currentPlayer?.status === 'active' && gameState.currentStreet !== 'showdown' && gameState.activePlayerPosition !== null && (() => {
               const amountToCall = gameState.currentBet - (currentPlayer?.currentBet || 0);
               const canCheck = amountToCall === 0;
               const isBet = gameState.currentBet === 0;
               const effectiveMax = Math.max(minRaise, maxRaise);
+              const isDisabled = !isMyTurn;
 
               return (
-                <div className="space-y-3">
-                  {/* Action buttons row */}
-                  <div className="flex gap-2">
+                <div className="flex gap-4">
+                  {/* Action buttons column - 1/2 width */}
+                  <div className="w-1/2 flex flex-col gap-2">
+                    {/* Fold button */}
                     <button
                       onClick={() => takeActionWithLog({ type: 'fold', playerId })}
-                      className="flex-1 bg-red-600/80 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-all"
+                      disabled={isDisabled}
+                      className={`w-full py-3 rounded-lg font-semibold transition-all ${
+                        isDisabled
+                          ? 'bg-red-900/30 text-red-400/50 cursor-not-allowed'
+                          : 'bg-red-600/80 hover:bg-red-600 text-white'
+                      }`}
                     >
                       Fold
                     </button>
 
-                    {canCheck ? (
-                      <button
-                        onClick={() => takeActionWithLog({ type: 'check', playerId })}
-                        className="flex-1 bg-gray-600/80 hover:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-all"
-                      >
-                        Check
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => takeActionWithLog({ type: 'call', playerId })}
-                        className="flex-1 bg-green-600/80 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition-all"
-                      >
-                        Call ${amountToCall}
-                      </button>
-                    )}
+                    {/* Check/Call button with auto check/fold */}
+                    <div className="flex gap-1">
+                      {canCheck ? (
+                        <button
+                          onClick={() => takeActionWithLog({ type: 'check', playerId })}
+                          disabled={isDisabled}
+                          className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
+                            isDisabled
+                              ? 'bg-gray-700/30 text-gray-500 cursor-not-allowed'
+                              : 'bg-gray-600/80 hover:bg-gray-600 text-white'
+                          }`}
+                        >
+                          Check
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => takeActionWithLog({ type: 'call', playerId })}
+                          disabled={isDisabled}
+                          className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
+                            isDisabled
+                              ? 'bg-green-900/30 text-green-400/50 cursor-not-allowed'
+                              : 'bg-green-600/80 hover:bg-green-600 text-white'
+                          }`}
+                        >
+                          Call ${amountToCall}
+                        </button>
+                      )}
+                      {/* Auto check/fold toggle - only when not my turn */}
+                      {!isMyTurn && (
+                        <button
+                          onClick={() => setAutoCheckFold(!autoCheckFold)}
+                          className={`px-3 rounded-lg transition-all flex items-center gap-1 text-sm ${
+                            autoCheckFold
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700'
+                          }`}
+                          title={autoCheckFold ? 'Auto check/fold ON' : 'Auto check/fold OFF'}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${autoCheckFold ? 'bg-white' : 'bg-gray-500'}`}></span>
+                          Auto
+                        </button>
+                      )}
+                    </div>
 
+                    {/* Raise/Bet button */}
                     <button
                       onClick={() => takeActionWithLog({
                         type: isBet ? 'bet' : 'raise',
                         playerId,
                         amount: raiseAmount
                       })}
-                      disabled={raiseAmount < minRaise || raiseAmount > maxRaise}
-                      className="flex-1 bg-yellow-500/90 hover:bg-yellow-500 disabled:bg-gray-600 text-black font-semibold py-3 rounded-lg transition-all"
+                      disabled={isDisabled || raiseAmount < minRaise || raiseAmount > maxRaise}
+                      className={`w-full py-3 rounded-lg font-semibold transition-all ${
+                        isDisabled
+                          ? 'bg-yellow-900/30 text-yellow-400/50 cursor-not-allowed'
+                          : 'bg-yellow-500/90 hover:bg-yellow-500 disabled:bg-gray-600 text-black'
+                      }`}
                     >
                       {raiseAmount >= maxRaise ? 'All In' : isBet ? 'Bet' : 'Raise'} ${raiseAmount}
                     </button>
+
+                    {/* Slider beneath raise button */}
+                    <div className={`flex items-center gap-2 bg-gray-700/30 rounded-lg p-2 ${isDisabled ? 'opacity-50' : ''}`}>
+                      <span className="text-xs text-gray-500">${minRaise}</span>
+                      <input
+                        type="range"
+                        min={minRaise}
+                        max={effectiveMax}
+                        step={gameState.bigBlind || 20}
+                        value={raiseAmount}
+                        onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                        disabled={isDisabled}
+                        className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-yellow-500 disabled:cursor-not-allowed"
+                      />
+                      <span className="text-xs text-gray-500">${effectiveMax}</span>
+                    </div>
+
+                    {/* Quick buttons beneath slider */}
+                    <div className={`flex gap-1 ${isDisabled ? 'opacity-50' : ''}`}>
+                      {[
+                        { label: 'Min', value: minRaise },
+                        { label: '½ Pot', value: Math.max(minRaise, Math.min(Math.floor((gameState.pot || 0) * 0.5), effectiveMax)) },
+                        { label: 'Pot', value: Math.max(minRaise, Math.min(gameState.pot || minRaise, effectiveMax)) },
+                        { label: 'All In', value: effectiveMax, highlight: true }
+                      ].map(btn => (
+                        <button
+                          key={btn.label}
+                          onClick={() => setRaiseAmount(btn.value)}
+                          disabled={isDisabled}
+                          className={`flex-1 py-1.5 text-xs font-medium rounded transition-all ${
+                            isDisabled
+                              ? 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                              : btn.highlight
+                                ? 'bg-yellow-600/80 hover:bg-yellow-600 text-white'
+                                : 'bg-gray-700/50 hover:bg-gray-700 text-gray-300'
+                          }`}
+                        >
+                          {btn.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  {/* Slider row */}
-                  <div className="flex items-center gap-3 bg-gray-700/30 rounded-lg p-3">
-                    <span className="text-xs text-gray-500 w-12">${minRaise}</span>
-                    <input
-                      type="range"
-                      min={minRaise}
-                      max={effectiveMax}
-                      step={gameState.bigBlind || 20}
-                      value={raiseAmount}
-                      onChange={(e) => setRaiseAmount(Number(e.target.value))}
-                      className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-                    />
-                    <span className="text-xs text-gray-500 w-16 text-right">${effectiveMax}</span>
-                  </div>
-
-                  {/* Quick buttons */}
-                  <div className="flex gap-2">
-                    {[
-                      { label: 'Min', value: minRaise },
-                      { label: '½ Pot', value: Math.max(minRaise, Math.min(Math.floor((gameState.pot || 0) * 0.5), effectiveMax)) },
-                      { label: 'Pot', value: Math.max(minRaise, Math.min(gameState.pot || minRaise, effectiveMax)) },
-                      { label: 'All In', value: effectiveMax, highlight: true }
-                    ].map(btn => (
-                      <button
-                        key={btn.label}
-                        onClick={() => setRaiseAmount(btn.value)}
-                        className={`flex-1 py-2 text-xs font-medium rounded transition-all ${
-                          btn.highlight
-                            ? 'bg-yellow-600/80 hover:bg-yellow-600 text-white'
-                            : 'bg-gray-700/50 hover:bg-gray-700 text-gray-300'
-                        }`}
-                      >
-                        {btn.label}
-                      </button>
-                    ))}
+                  {/* Status area - 1/2 width */}
+                  <div className="w-1/2 flex flex-col justify-center">
+                    {/* Waiting indicator when not my turn */}
+                    {!isMyTurn && (
+                      <div className="flex flex-col items-center gap-2 text-gray-400">
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-400 border-t-transparent"></div>
+                        <span className="text-sm">Waiting for {activePlayer?.name || 'opponent'}...</span>
+                        {autoCheckFold && (
+                          <span className="text-blue-400 text-xs bg-blue-900/30 px-2 py-1 rounded">
+                            Auto {canCheck ? 'check' : 'fold'} enabled
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {/* Your turn indicator */}
+                    {isMyTurn && (
+                      <div className="flex flex-col items-center gap-2 text-green-400">
+                        <span className="text-lg font-bold">Your Turn</span>
+                        <span className="text-sm text-gray-400">Make your move</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })()}
-
-            {/* Waiting for opponent */}
-            {isSeated && !isMyTurn && gameState.activePlayerPosition !== null && gameState.currentStreet !== 'showdown' && (
-              <div className="flex flex-col items-center gap-4 py-6">
-                <div className="flex items-center gap-3 text-gray-400">
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent"></div>
-                  <span>Waiting for {activePlayer?.name || 'opponent'}...</span>
-                </div>
-
-                {/* Auto check/fold checkbox - HIDDEN until fixed */}
-                {/* TODO: Re-enable when auto check/fold logic is fixed
-                <label className={`flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all ${
-                  autoCheckFold
-                    ? 'bg-blue-600/30 border border-blue-500/50'
-                    : 'bg-gray-700/30 border border-gray-600/50 hover:bg-gray-700/50'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={autoCheckFold}
-                    onChange={(e) => setAutoCheckFold(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-500 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 bg-gray-700"
-                  />
-                  <span className={`text-sm font-medium ${autoCheckFold ? 'text-blue-400' : 'text-gray-400'}`}>
-                    Check/Fold
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    (auto-check if possible, fold otherwise)
-                  </span>
-                </label>
-                */}
-              </div>
-            )}
           </div>
         </div>
 
