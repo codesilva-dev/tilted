@@ -60,7 +60,8 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   const [isLeavingSeat, setIsLeavingSeat] = useState(false);
   const [raiseAmount, setRaiseAmount] = useState<number>(0);
   const [isMusicMuted, setIsMusicMuted] = useState(false);
-  const [musicVolume, setMusicVolume] = useState(0.3);
+  const [musicVolume, setMusicVolume] = useState(0.15);
+  const [autoCheckFold, setAutoCheckFold] = useState(false);
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
   const musicStartedRef = useRef(false);
 
@@ -266,7 +267,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   useEffect(() => {
     // Create audio element for turn alert
     turnAlertRef.current = new Audio('/turn-alert.mp3');
-    turnAlertRef.current.volume = 0.5;
+    turnAlertRef.current.volume = 0.8;
 
     return () => {
       turnAlertRef.current = null;
@@ -344,6 +345,38 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     }
     prevActivePlayerRef.current = gameState.activePlayerPosition;
   }, [gameState, addLogEntry]);
+
+  // Reset auto check/fold when street changes
+  const prevStreetForAutoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!gameState) return;
+
+    if (prevStreetForAutoRef.current && prevStreetForAutoRef.current !== gameState.currentStreet) {
+      setAutoCheckFold(false);
+    }
+    prevStreetForAutoRef.current = gameState.currentStreet;
+  }, [gameState?.currentStreet]);
+
+  // Auto check/fold when it's player's turn and enabled
+  useEffect(() => {
+    if (!autoCheckFold || !isMyTurn || !currentPlayer || currentPlayer.status !== 'active' || !gameState) return;
+    if (gameState.currentStreet === 'showdown') return;
+
+    const amountToCall = gameState.currentBet - (currentPlayer.currentBet || 0);
+    const canCheck = amountToCall === 0;
+
+    // Small delay to make the auto-action visible
+    const timer = setTimeout(() => {
+      if (canCheck) {
+        takeAction({ type: 'check', playerId });
+      } else {
+        takeAction({ type: 'fold', playerId });
+      }
+      setAutoCheckFold(false);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [autoCheckFold, isMyTurn, currentPlayer, gameState, playerId, takeAction]);
 
   // Auto-scroll game log
   useEffect(() => {
@@ -867,9 +900,31 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
 
             {/* Waiting for opponent */}
             {isSeated && !isMyTurn && gameState.activePlayerPosition !== null && gameState.currentStreet !== 'showdown' && (
-              <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent"></div>
-                <span>Waiting for {activePlayer?.name || 'opponent'}...</span>
+              <div className="flex flex-col items-center gap-4 py-6">
+                <div className="flex items-center gap-3 text-gray-400">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent"></div>
+                  <span>Waiting for {activePlayer?.name || 'opponent'}...</span>
+                </div>
+
+                {/* Auto check/fold checkbox */}
+                <label className={`flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all ${
+                  autoCheckFold
+                    ? 'bg-blue-600/30 border border-blue-500/50'
+                    : 'bg-gray-700/30 border border-gray-600/50 hover:bg-gray-700/50'
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={autoCheckFold}
+                    onChange={(e) => setAutoCheckFold(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-500 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 bg-gray-700"
+                  />
+                  <span className={`text-sm font-medium ${autoCheckFold ? 'text-blue-400' : 'text-gray-400'}`}>
+                    Check/Fold
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    (auto-check if possible, fold otherwise)
+                  </span>
+                </label>
               </div>
             )}
           </div>
@@ -892,13 +947,13 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
             <input
               type="range"
               min="0"
-              max="1"
-              step="0.05"
+              max="0.3"
+              step="0.01"
               value={musicVolume}
               onChange={(e) => setMusicVolume(Number(e.target.value))}
               className="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500 [writing-mode:vertical-lr] [direction:rtl]"
               style={{ height: '100px', width: '8px' }}
-              title={`Volume: ${Math.round(musicVolume * 100)}%`}
+              title={`Volume: ${Math.round((musicVolume / 0.3) * 100)}%`}
             />
           </div>
         </div>
