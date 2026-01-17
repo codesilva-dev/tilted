@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { TableState, Player } from '@/game/types/game-state';
 
 interface PokerTableProps {
@@ -82,6 +83,99 @@ const getSeatPosition = (seatNumber: number): React.CSSProperties => {
   };
 };
 
+// Buy-in Modal Component
+interface BuyInModalProps {
+  seatPosition: number;
+  onConfirm: (buyIn: number) => void;
+  onCancel: () => void;
+  minBuyIn?: number;
+  maxBuyIn?: number;
+}
+
+function BuyInModal({ seatPosition, onConfirm, onCancel, minBuyIn = 1000, maxBuyIn = 10000 }: BuyInModalProps) {
+  const [buyInAmount, setBuyInAmount] = useState(Math.floor((minBuyIn + maxBuyIn) / 2));
+
+  const presetAmounts = [
+    { label: 'Min', value: minBuyIn },
+    { label: '$2,500', value: 2500 },
+    { label: '$5,000', value: 5000 },
+    { label: 'Max', value: maxBuyIn },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl border border-gray-700">
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="text-4xl mb-2">💰</div>
+          <h2 className="text-2xl font-bold text-white">Take Seat {seatPosition}</h2>
+          <p className="text-gray-400 text-sm mt-1">Choose your buy-in amount</p>
+        </div>
+
+        {/* Buy-in Amount Display */}
+        <div className="bg-gray-900/50 rounded-xl p-4 mb-6">
+          <div className="text-center">
+            <div className="text-sm text-gray-400 mb-1">Buy-in Amount</div>
+            <div className="text-4xl font-bold text-green-400">
+              ${buyInAmount.toLocaleString()}
+            </div>
+          </div>
+        </div>
+
+        {/* Slider */}
+        <div className="mb-6">
+          <input
+            type="range"
+            min={minBuyIn}
+            max={maxBuyIn}
+            step={100}
+            value={buyInAmount}
+            onChange={(e) => setBuyInAmount(Number(e.target.value))}
+            className="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+          />
+          <div className="flex justify-between text-xs text-gray-500 mt-2">
+            <span>${minBuyIn.toLocaleString()}</span>
+            <span>${maxBuyIn.toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* Preset Buttons */}
+        <div className="grid grid-cols-4 gap-2 mb-6">
+          {presetAmounts.map((preset) => (
+            <button
+              key={preset.label}
+              onClick={() => setBuyInAmount(preset.value)}
+              className={`py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                buyInAmount === preset.value
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-3 px-4 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-xl transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(buyInAmount)}
+            className="flex-1 py-3 px-4 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-xl transition-colors"
+          >
+            Sit Down
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PokerTable({
   gameState,
   currentPlayerId,
@@ -93,13 +187,23 @@ export default function PokerTable({
 }: PokerTableProps) {
   const TOTAL_SEATS = 9; // Always 9 seats
 
+  // Buy-in modal state
+  const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+
   const handleSeatClick = (seatPosition: number) => {
     if (!availableSeats.includes(seatPosition)) return;
+    setSelectedSeat(seatPosition);
+  };
 
-    const buyIn = prompt(`Enter buy-in amount (min: 1000, max: 5000):`);
-    if (buyIn && !isNaN(+buyIn)) {
-      onTakeSeat(seatPosition, +buyIn);
+  const handleBuyInConfirm = (buyIn: number) => {
+    if (selectedSeat !== null) {
+      onTakeSeat(selectedSeat, buyIn);
+      setSelectedSeat(null);
     }
+  };
+
+  const handleBuyInCancel = () => {
+    setSelectedSeat(null);
   };
 
   const getSeatPlayer = (seatPosition: number): Player | undefined => {
@@ -281,12 +385,24 @@ export default function PokerTable({
   };
 
   return (
-    <div className="relative w-full max-w-[1000px] mx-auto aspect-[16/10] shadow-2xl">
-      {/* Table background image */}
-      <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: 'url(/table.jpg)' }}
-      >
+    <>
+      {/* Buy-in Modal */}
+      {selectedSeat !== null && (
+        <BuyInModal
+          seatPosition={selectedSeat}
+          onConfirm={handleBuyInConfirm}
+          onCancel={handleBuyInCancel}
+          minBuyIn={1000}
+          maxBuyIn={10000}
+        />
+      )}
+
+      <div className="relative w-full max-w-[1000px] mx-auto aspect-[16/10] shadow-2xl">
+        {/* Table background image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: 'url(/table.jpg)' }}
+        >
         {/* Overlay container for seats and cards */}
         <div className="absolute inset-0">
         {/* Center area - Community cards and pot */}
@@ -329,6 +445,7 @@ export default function PokerTable({
         {Array.from({ length: TOTAL_SEATS }, (_, i) => renderSeat(i + 1))}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
