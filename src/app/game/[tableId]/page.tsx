@@ -59,6 +59,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   const [isClient, setIsClient] = useState(false);
   const [isLeavingSeat, setIsLeavingSeat] = useState(false);
   const [raiseAmount, setRaiseAmount] = useState<number>(0);
+  const [isMusicMuted, setIsMusicMuted] = useState(false);
+  const [musicVolume, setMusicVolume] = useState(0.3);
+  const bgMusicRef = useRef<HTMLAudioElement | null>(null);
+  const musicStartedRef = useRef(false);
 
   // Game log for live feed
   interface GameLogEntry {
@@ -113,6 +117,55 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
       return () => clearTimeout(timer);
     }
   }, [tableNotFound, router]);
+
+  // Background music - initialize once on mount
+  useEffect(() => {
+    bgMusicRef.current = new Audio('/sly.mp3');
+    bgMusicRef.current.loop = true;
+    bgMusicRef.current.volume = musicVolume;
+
+    return () => {
+      if (bgMusicRef.current) {
+        bgMusicRef.current.pause();
+        bgMusicRef.current = null;
+      }
+      musicStartedRef.current = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Start playing when connected (only once)
+  useEffect(() => {
+    if (isConnected && bgMusicRef.current && !musicStartedRef.current) {
+      musicStartedRef.current = true;
+      bgMusicRef.current.play().catch(() => {
+        // Autoplay blocked - will start on first user interaction
+      });
+    }
+  }, [isConnected]);
+
+  // Handle music mute toggle
+  useEffect(() => {
+    if (bgMusicRef.current) {
+      bgMusicRef.current.muted = isMusicMuted;
+    }
+  }, [isMusicMuted]);
+
+  // Handle music volume change
+  useEffect(() => {
+    if (bgMusicRef.current) {
+      bgMusicRef.current.volume = musicVolume;
+    }
+  }, [musicVolume]);
+
+  // Toggle music mute
+  const toggleMusic = useCallback(() => {
+    setIsMusicMuted(prev => !prev);
+    // If unmuting and music hasn't started yet, try to play
+    if (isMusicMuted && bgMusicRef.current) {
+      bgMusicRef.current.play().catch(() => {});
+    }
+  }, [isMusicMuted]);
 
   // Calculate derived state (safe with optional chaining)
   const currentPlayer = gameState?.players.find(p => p.id === playerId);
@@ -424,12 +477,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
             <Link href="/lobby" className="text-gray-300 hover:text-white transition-colors">
               Lobby
             </Link>
-            <div className="flex items-center gap-3">
-              <div className="text-sm text-gray-400">
-                Playing as: <span className="text-white font-semibold">{playerName}</span>
-                {isSeated && <span className="ml-2 text-green-400">• Seated</span>}
-                {!isSeated && <span className="ml-2 text-yellow-400">• Spectating</span>}
-              </div>
+            <div className="text-sm text-gray-400">
+              Playing as: <span className="text-white font-semibold">{playerName}</span>
+              {isSeated && <span className="ml-2 text-green-400">• Seated</span>}
+              {!isSeated && <span className="ml-2 text-yellow-400">• Spectating</span>}
             </div>
           </div>
         </div>
@@ -831,6 +882,44 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
             {JSON.stringify(gameState, null, 2)}
           </pre>
         </details>
+      </div>
+
+      {/* Fixed Music Control - Bottom Right */}
+      <div className="fixed bottom-6 right-6 z-50 group">
+        {/* Volume slider - appears above on hover, with padding to bridge the gap */}
+        <div className="absolute bottom-full right-0 pb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-y-2 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto">
+          <div className="bg-gray-800/95 backdrop-blur border border-gray-600/50 rounded-lg p-3 shadow-xl">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={musicVolume}
+              onChange={(e) => setMusicVolume(Number(e.target.value))}
+              className="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500 [writing-mode:vertical-lr] [direction:rtl]"
+              style={{ height: '100px', width: '8px' }}
+              title={`Volume: ${Math.round(musicVolume * 100)}%`}
+            />
+          </div>
+        </div>
+
+        {/* Mute button - always visible */}
+        <button
+          onClick={toggleMusic}
+          className="w-12 h-12 rounded-full bg-gray-800/90 backdrop-blur border border-gray-600/50 hover:bg-gray-700/90 hover:border-gray-500 transition-all shadow-lg flex items-center justify-center text-xl"
+          title={isMusicMuted ? 'Unmute music' : 'Mute music'}
+        >
+          {isMusicMuted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            </svg>
+          )}
+        </button>
       </div>
     </div>
   );
