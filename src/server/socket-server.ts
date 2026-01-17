@@ -60,6 +60,76 @@ const disconnectedPlayers = new Map<string, DisconnectedPlayer>();
 const RECONNECT_GRACE_PERIOD = 30000;
 
 /**
+ * Check if a player is disconnected (in grace period or marked as leaving)
+ */
+function isPlayerDisconnected(playerId: string, room: GameRoom): boolean {
+  // Check if in grace period
+  if (disconnectedPlayers.has(playerId)) {
+    return true;
+  }
+  // Check if marked as leaving
+  const state = room.controller.getState();
+  const player = state.players.find(p => p.id === playerId);
+  return player?.isLeaving ?? false;
+}
+
+/**
+ * Fold all disconnected players who are active in the hand
+ * Returns true if any players were folded
+ */
+async function foldDisconnectedActivePlayers(room: GameRoom, tableId: string): Promise<boolean> {
+  let anyFolded = false;
+  let iterations = 0;
+  const maxIterations = 10; // Safety limit
+
+  while (iterations < maxIterations) {
+    iterations++;
+    const state = room.controller.getState();
+
+    // If hand is over or no active position, stop
+    if (state.currentStreet === 'showdown' || state.activePlayerPosition === null) {
+      break;
+    }
+
+    // Find the current active player
+    const activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition);
+    if (!activePlayer) {
+      break;
+    }
+
+    // Check if the active player is disconnected
+    if (!isPlayerDisconnected(activePlayer.id, room)) {
+      // Active player is connected, stop folding chain
+      break;
+    }
+
+    // Active player is disconnected - fold them
+    log(`[Disconnect] Auto-folding disconnected player ${activePlayer.name} (position ${activePlayer.seatPosition})`);
+
+    try {
+      const foldAction: GameAction = {
+        type: 'fold',
+        playerId: activePlayer.id,
+        timestamp: new Date()
+      };
+      await room.controller.handleAction(foldAction);
+      anyFolded = true;
+
+      // Broadcast the fold action
+      io.to(tableId).emit('action-processed', {
+        table: room.controller.getState(),
+        action: foldAction
+      });
+    } catch (error) {
+      console.error(`[Disconnect] Error auto-folding ${activePlayer.name}:`, error);
+      break;
+    }
+  }
+
+  return anyFolded;
+}
+
+/**
  * Handle disconnection timeout - called when grace period expires
  */
 async function handleDisconnectTimeout(playerId: string): Promise<void> {
@@ -90,24 +160,12 @@ async function handleDisconnectTimeout(playerId: string): Promise<void> {
     const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
     if (handInProgress) {
-      // Fold if it's their turn
-      if (player.status === 'active' && state.activePlayerPosition === player.seatPosition) {
-        log(`[Reconnect] ${playerName} timed out - folding (it's their turn)`);
-        try {
-          const foldAction: GameAction = {
-            type: 'fold',
-            playerId,
-            timestamp: new Date()
-          };
-          await room.controller.handleAction(foldAction);
-        } catch (error) {
-          console.error('[Reconnect] Error folding player:', error);
-        }
-      }
-
-      // Mark as leaving
+      // Mark as leaving first
       room.controller.markPlayerAsLeaving(playerId);
       log(`[Reconnect] ${playerName} marked as leaving after timeout`);
+
+      // Fold any disconnected players who are now active (including this one if it's their turn)
+      await foldDisconnectedActivePlayers(room, tableId);
 
       // Check if hand ended
       const updatedState = room.controller.getState();
@@ -152,6 +210,18 @@ async function handleDisconnectTimeout(playerId: string): Promise<void> {
  * Create HTTP server and Socket.IO instance
  */
 const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // CORS headers for all HTTP requests (needed for health ping from client)
+  res.setHeader('Access-Control-Allow-Origin', CLIENT_URL);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   // Health check endpoint for Render and other hosting platforms
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -718,7 +788,8 @@ io.on('connection', (socket: Socket) => {
       const player = state.players.find(p => p.id === playerId);
 
       if (player) {
-        const handInProgress = player.holeCards.length > 0;
+        // Hand is in progress if player has cards AND we're not at showdown (showdown = hand complete)
+        const handInProgress = player.holeCards.length > 0 && state.currentStreet !== 'showdown';
 
         if (handInProgress) {
           // Mid-hand: Fold and mark as leaving
@@ -732,12 +803,12 @@ io.on('connection', (socket: Socket) => {
             await room.controller.handleAction(foldAction);
           }
 
-          // Mark player as leaving
+          // Mark player as leaving (will be removed when next hand starts)
           room.controller.markPlayerAsLeaving(playerId);
 
           log(`[Leave Room] ${player.name} marked as leaving, will be removed after hand`);
         } else {
-          // No hand in progress: Remove immediately
+          // No hand in progress OR at showdown: Remove immediately
           room.controller.removePlayer(playerId);
           room.seatedPlayers.delete(playerId);
           log(`[Leave Room] ${player.name} removed from table`);

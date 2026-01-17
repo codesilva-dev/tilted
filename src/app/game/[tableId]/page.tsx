@@ -275,7 +275,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     }
   }, [gameLog]);
 
-  // Auto-advance after showdown (10 second countdown)
+  // Auto-advance after showdown (15 second countdown)
   // Only ONE player should trigger startHand to avoid duplicates
   // We pick the player with the lowest seat position who has chips
   const [showdownCountdown, setShowdownCountdown] = useState<number | null>(null);
@@ -302,7 +302,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
 
     if (gameState?.currentStreet === 'showdown' && isSeated && !isLeaving) {
       // Always show countdown to all players
-      setShowdownCountdown(10);
+      setShowdownCountdown(15);
 
       autoAdvanceTimerRef.current = setInterval(() => {
         setShowdownCountdown((prev) => {
