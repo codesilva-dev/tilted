@@ -15,17 +15,25 @@ export function postBlinds(table: TableState): TableState {
     throw new Error('Small blind or big blind player not found');
   }
 
-  // Post small blind
+  // Post small blind (may be partial if player is short-stacked)
   const sbAmount = Math.min(sbPlayer.stack, newTable.smallBlind);
   sbPlayer.stack -= sbAmount;
   sbPlayer.currentBet = sbAmount;
   sbPlayer.totalBetInHand = sbAmount;
+  // Mark as all-in if they couldn't afford the full blind
+  if (sbPlayer.stack === 0) {
+    sbPlayer.status = 'all-in';
+  }
 
-  // Post big blind
+  // Post big blind (may be partial if player is short-stacked)
   const bbAmount = Math.min(bbPlayer.stack, newTable.bigBlind);
   bbPlayer.stack -= bbAmount;
   bbPlayer.currentBet = bbAmount;
   bbPlayer.totalBetInHand = bbAmount;
+  // Mark as all-in if they couldn't afford the full blind
+  if (bbPlayer.stack === 0) {
+    bbPlayer.status = 'all-in';
+  }
 
   // Update pot and current bet
   newTable.pot = sbAmount + bbAmount;
@@ -288,13 +296,17 @@ export function isBettingRoundComplete(table: TableState): boolean {
     return true;
   }
 
-  // If only one active player and all others are all-in, betting is complete
-  // (there's no one who can respond to a bet, so no point in asking for action)
+  // If only one active player and all others are all-in, check if betting is complete
   if (activePlayers.length === 1) {
     const allInPlayers = table.players.filter(p => p.status === 'all-in');
     if (allInPlayers.length > 0 && activePlayers.length + allInPlayers.length === playersInHand.length) {
-      // Only one active player, rest are all-in - no betting action needed
-      return true;
+      const activePlayer = activePlayers[0];
+      // Only auto-complete if active player has already matched the current bet
+      // (This handles "run out the board" on later streets where currentBet=0)
+      // If they haven't matched (e.g., someone just went all-in), they need to respond
+      if (activePlayer.currentBet >= table.currentBet) {
+        return true;
+      }
     }
   }
 

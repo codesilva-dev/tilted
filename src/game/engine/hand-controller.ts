@@ -415,10 +415,11 @@ export class HandController {
       console.log(`${prefix} ${marker} ${p.name}: [${cards}] (${p.status}, bet:${p.totalBetInHand}, stack:${p.stack})`);
     });
 
-    // Update street to showdown
+    // Update street to showdown - no more actions allowed
     this.state = {
       ...this.state,
-      currentStreet: 'showdown'
+      currentStreet: 'showdown',
+      activePlayerPosition: null  // No one should act during showdown
     };
 
     // Distribute pots and get result
