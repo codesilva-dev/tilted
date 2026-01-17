@@ -392,8 +392,8 @@ export default function PokerTable({
           seatPosition={selectedSeat}
           onConfirm={handleBuyInConfirm}
           onCancel={handleBuyInCancel}
-          minBuyIn={1000}
-          maxBuyIn={10000}
+          minBuyIn={gameState.minBuyIn}
+          maxBuyIn={gameState.maxBuyIn}
         />
       )}
 

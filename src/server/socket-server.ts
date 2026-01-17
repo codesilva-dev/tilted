@@ -183,7 +183,14 @@ function getOrCreateRoom(config: TableConfig): GameRoom {
   let room = gameRooms.get(config.tableId);
 
   if (!room) {
-    const initialState = createInitialTableState(config.tableId, config.name, config.smallBlind, config.bigBlind);
+    const initialState = createInitialTableState(
+      config.tableId,
+      config.name,
+      config.smallBlind,
+      config.bigBlind,
+      config.minBuyIn,
+      config.maxBuyIn
+    );
     const controller = new HandController(initialState);
 
     room = {

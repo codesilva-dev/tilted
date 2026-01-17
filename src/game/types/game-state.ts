@@ -33,6 +33,8 @@ export interface TableState {
     bigBlindPosition: number;
     smallBlind: number;
     bigBlind: number;
+    minBuyIn: number;
+    maxBuyIn: number;
     currentStreet: Street;
     communityCards: Card[];
     pot: number;
@@ -117,7 +119,9 @@ export function createInitialTableState(
   tableId: string,
   tableName: string,
   smallBlind: number,
-  bigBlind: number
+  bigBlind: number,
+  minBuyIn: number = 1000,
+  maxBuyIn: number = 10000
 ): TableState {
   return {
     id: tableId,
@@ -128,6 +132,8 @@ export function createInitialTableState(
     bigBlindPosition: 2,
     smallBlind,
     bigBlind,
+    minBuyIn,
+    maxBuyIn,
     currentStreet: 'pre-flop',
     communityCards: [],
     pot: 0,
