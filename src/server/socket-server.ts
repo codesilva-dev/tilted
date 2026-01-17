@@ -173,7 +173,13 @@ const io = new Server(httpServer, {
     origin: CLIENT_URL,
     methods: ['GET', 'POST'],
     credentials: true
-  }
+  },
+  // Aggressive ping/pong to prevent Render's proxy from killing "idle" connections
+  // Render and other cloud proxies terminate WebSocket connections they perceive as idle
+  pingInterval: 10000,  // Send ping every 10 seconds (default: 25000)
+  pingTimeout: 5000,    // Wait 5 seconds for pong response (default: 20000)
+  // Allow both transports but prefer websocket
+  transports: ['websocket', 'polling']
 });
 
 /**

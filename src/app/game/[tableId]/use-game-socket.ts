@@ -42,26 +42,55 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     console.log('[Socket] Connecting to', SOCKET_URL);
 
     const socket = io(SOCKET_URL, {
-      transports: ['websocket'],
+      // Allow both transports with websocket preferred - polling is fallback if websocket fails
+      transports: ['websocket', 'polling'],
+      // Reconnection settings - more aggressive for cloud hosting
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 10,
+      // Timeout for connection attempts
+      timeout: 20000
     });
 
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[Socket] Connected!');
+      console.log('[Socket] Connected!', socket.recovered ? '(recovered)' : '(fresh)');
       setIsConnected(true);
       setError(null);
 
-      // Auto-join room when connected
+      // Auto-join room when connected (works for both fresh and recovered connections)
       socket.emit('join-room', { tableId, playerId, playerName });
     });
 
-    socket.on('disconnect', () => {
-      console.log('[Socket] Disconnected');
+    socket.on('disconnect', (reason) => {
+      console.log('[Socket] Disconnected, reason:', reason);
       setIsConnected(false);
+
+      // If the server forcefully disconnected us, try to reconnect
+      if (reason === 'io server disconnect') {
+        socket.connect();
+      }
+      // For other reasons (transport close, ping timeout), Socket.IO auto-reconnects
+    });
+
+    // Manager-level reconnection events
+    socket.io.on('reconnect', (attemptNumber) => {
+      console.log('[Socket] Reconnected after', attemptNumber, 'attempts');
+    });
+
+    socket.io.on('reconnect_attempt', (attemptNumber) => {
+      console.log('[Socket] Reconnection attempt', attemptNumber);
+    });
+
+    socket.io.on('reconnect_error', (error) => {
+      console.error('[Socket] Reconnection error:', error.message);
+    });
+
+    socket.io.on('reconnect_failed', () => {
+      console.error('[Socket] Failed to reconnect after all attempts');
+      setError('Lost connection to server. Please refresh the page.');
     });
 
     socket.on('connect_error', (err: Error) => {

@@ -4,14 +4,14 @@ interface UseActionTimerProps {
   isMyTurn: boolean;
   activePlayerPosition: number | null; // Track whose turn it is (for all clients)
   onTimeout: () => void;
-  timeLimit?: number; // in seconds, default 30
+  timeLimit?: number; // in seconds, default 25
 }
 
 export function useActionTimer({
   isMyTurn,
   activePlayerPosition,
   onTimeout,
-  timeLimit = 30
+  timeLimit = 25
 }: UseActionTimerProps) {
   const [timeRemaining, setTimeRemaining] = useState<number>(timeLimit);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
