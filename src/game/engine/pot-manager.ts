@@ -191,12 +191,15 @@ export function determineWinnersForPot(
   });
 
   // Find the best hand
+  console.log(`${prefix} Finding best hand among ${evaluatedPlayers.length} players...`);
   let bestHand = evaluatedPlayers[0].handRank;
   let bestPlayer = evaluatedPlayers[0].player.name;
 
   for (const evaluated of evaluatedPlayers) {
     const comparison = compareHands(evaluated.handRank, bestHand);
+    console.log(`${prefix}   Compare ${evaluated.player.name}(${evaluated.handRank.value}) vs best(${bestHand.value}): diff=${comparison}`);
     if (comparison > 0) {
+      console.log(`${prefix}   -> ${evaluated.player.name} is new best!`);
       bestHand = evaluated.handRank;
       bestPlayer = evaluated.player.name;
     }
@@ -205,9 +208,12 @@ export function determineWinnersForPot(
   console.log(`${prefix} Best hand: ${bestPlayer} with ${bestHand.description} (value: ${bestHand.value})`);
 
   // Find all players with the best hand (for split pots)
+  console.log(`${prefix} Checking for ties with best hand...`);
   const winners = evaluatedPlayers.filter(evaluated => {
     const comparison = compareHands(evaluated.handRank, bestHand);
-    return comparison === 0;
+    const isTied = comparison === 0;
+    console.log(`${prefix}   ${evaluated.player.name}(${evaluated.handRank.value}) vs best(${bestHand.value}): diff=${comparison}, tied=${isTied}`);
+    return isTied;
   });
 
   const winnerNames = winners.map(w => w.player.name);
@@ -245,11 +251,15 @@ export function distributePots(table: TableState): { table: TableState; result: 
   console.log(`${prefix} Community cards: [${table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
 
   // Log full player state at start of distribution
-  console.log(`${prefix} Player states at distribution start:`);
+  console.log(`${prefix} ════════════════════════════════════════════════════════════`);
+  console.log(`${prefix} SHOWDOWN DETAILS:`);
+  console.log(`${prefix} Board: [${table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+  console.log(`${prefix} Players:`);
   table.players.forEach((p, i) => {
     const holeStr = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
-    console.log(`${prefix}   [${i}] ${p.name}: status=${p.status}, bet=${p.totalBetInHand}, stack=${p.stack}, cards=[${holeStr}]`);
+    console.log(`${prefix}   [${i}] ${p.name}: [${holeStr}] | status=${p.status}, bet=${p.totalBetInHand}, stack=${p.stack}`);
   });
+  console.log(`${prefix} ════════════════════════════════════════════════════════════`);
 
   const pots = calculatePots(table);
   const potResults: PotResult[] = [];

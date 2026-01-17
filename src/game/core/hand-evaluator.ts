@@ -123,7 +123,7 @@ export function evaluateHand(cards: Card[]): HandRank {
         type: 'four-of-a-kind',
         cards: ordered as [Card, Card, Card, Card, Card],
         value: calculateValue('four-of-a-kind', ordered),
-        description: `Four of a Kind, ${quadCards[0].rank}s`
+        description: `Four of a Kind, ${quadCards[0].rank}s (${kicker.rank} kicker)`
         }
     }
 
@@ -143,11 +143,12 @@ export function evaluateHand(cards: Card[]): HandRank {
 
     // Flush: 5 cards of same suit
     if (flush) {
+        const flushStr = sorted.map(c => c.rank).join('-')
         return {
         type: 'flush',
         cards: sorted as [Card, Card, Card, Card, Card],
         value: calculateValue('flush', sorted),
-        description: `Flush, ${sorted[0].rank} high`
+        description: `Flush (${flushStr})`
         }
     }
 
@@ -170,12 +171,13 @@ export function evaluateHand(cards: Card[]): HandRank {
         const trips = sorted.filter(c => counts[c.rank] === 3)
         const kickers = sorted.filter(c => counts[c.rank] === 1)
         const ordered = [...trips, ...kickers]
+        const kickerStr = kickers.map(k => k.rank).join('-')
 
         return {
         type: 'three-of-a-kind',
         cards: ordered as [Card, Card, Card, Card, Card],
         value: calculateValue('three-of-a-kind', ordered),
-        description: `Three of a Kind, ${trips[0].rank}s`
+        description: `Three of a Kind, ${trips[0].rank}s (${kickerStr} kickers)`
         }
     }
 
@@ -189,7 +191,7 @@ export function evaluateHand(cards: Card[]): HandRank {
         type: 'two-pair',
         cards: ordered as [Card, Card, Card, Card, Card],
         value: calculateValue('two-pair', ordered),
-        description: `Two Pair, ${pairs[0].rank}s and ${pairs[2].rank}s`
+        description: `Two Pair, ${pairs[0].rank}s and ${pairs[2].rank}s (${kicker.rank} kicker)`
         }
     }
 
@@ -198,21 +200,23 @@ export function evaluateHand(cards: Card[]): HandRank {
         const pair = sorted.filter(c => counts[c.rank] === 2)
         const kickers = sorted.filter(c => counts[c.rank] === 1)
         const ordered = [...pair, ...kickers]
+        const kickerStr = kickers.map(k => k.rank).join('-')
 
         return {
         type: 'pair',
         cards: ordered as [Card, Card, Card, Card, Card],
         value: calculateValue('pair', ordered),
-        description: `Pair of ${pair[0].rank}s`
+        description: `Pair of ${pair[0].rank}s (${kickerStr} kickers)`
         }
     }
 
     // High Card: No matches
+    const highCardStr = sorted.map(c => c.rank).join('-')
     return {
         type: 'high-card',
         cards: sorted as [Card, Card, Card, Card, Card],
         value: calculateValue('high-card', sorted),
-        description: `${sorted[0].rank} high`
+        description: `High Card (${highCardStr})`
     }
 }
 

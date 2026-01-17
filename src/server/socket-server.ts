@@ -806,6 +806,17 @@ io.on('connection', (socket: Socket) => {
         io.to(tableId).emit('players-removed', { playerIds: leavingPlayers.map(p => p.id) });
       }
 
+      // Remove players with 0 chips (they're busted)
+      const bustedPlayers = room.controller.removeBustedPlayers();
+      if (bustedPlayers.length > 0) {
+        for (const player of bustedPlayers) {
+          room.seatedPlayers.delete(player.id);
+          room.spectators.set(player.id, { id: player.id, name: player.name });
+        }
+        log(`${prefix} Removed busted players (0 chips): [${bustedPlayers.map(p => p.name).join(', ')}]`);
+        io.to(tableId).emit('players-removed', { playerIds: bustedPlayers.map(p => p.id) });
+      }
+
       // Check if we have enough players to start
       // Note: players with small stacks (< BB) can still play - they'll go all-in on the blind
       const state = room.controller.getState();

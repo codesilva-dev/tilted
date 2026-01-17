@@ -265,7 +265,8 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   }, [gameLog]);
 
   // Auto-advance after showdown (10 second countdown)
-  // Only non-leaving players run the countdown to avoid duplicate startHand calls
+  // Only ONE player should trigger startHand to avoid duplicates
+  // We pick the player with the lowest seat position who has chips
   const [showdownCountdown, setShowdownCountdown] = useState<number | null>(null);
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -277,20 +278,33 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     }
 
     // Start countdown if at showdown, seated, and NOT leaving
-    // Players marked as leaving shouldn't trigger startHand
     const isLeaving = currentPlayer?.isLeaving ?? false;
+
+    // Check if there are enough players with chips to continue
+    const playersWithChips = gameState?.players.filter(p => p.stack > 0 && !p.isLeaving) || [];
+    const hasEnoughPlayers = playersWithChips.length >= 2;
+
+    // Only the first player by seat position (with chips) should trigger startHand
+    // This prevents duplicate requests from multiple clients
+    const firstPlayerWithChips = playersWithChips.sort((a, b) => a.seatPosition - b.seatPosition)[0];
+    const shouldTriggerStart = firstPlayerWithChips?.id === playerId;
+
     if (gameState?.currentStreet === 'showdown' && isSeated && !isLeaving) {
+      // Always show countdown to all players
       setShowdownCountdown(10);
 
       autoAdvanceTimerRef.current = setInterval(() => {
         setShowdownCountdown((prev) => {
           if (prev === null || prev <= 1) {
-            // Time's up - try to start next hand (removes leaving players)
+            // Time's up
             if (autoAdvanceTimerRef.current) {
               clearInterval(autoAdvanceTimerRef.current);
               autoAdvanceTimerRef.current = null;
             }
-            startHand();
+            // Only trigger startHand if this client is responsible AND there are enough players
+            if (shouldTriggerStart && hasEnoughPlayers) {
+              startHand();
+            }
             return null;
           }
           return prev - 1;
@@ -305,7 +319,7 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     } else {
       setShowdownCountdown(null);
     }
-  }, [gameState?.currentStreet, isSeated, currentPlayer?.isLeaving, startHand]);
+  }, [gameState?.currentStreet, gameState?.players, isSeated, currentPlayer?.isLeaving, playerId, startHand]);
 
   // Early returns AFTER all hooks
   if (!isClient || !isConnected) {
