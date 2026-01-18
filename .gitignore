@@ -46,6 +46,9 @@ prisma/migrations/migration_lock.toml
 CLAUDE.md
 
 # Ignore restart script
+
 restart-app.ps1
 .vscode/tasks.json
 /dist/
+
+
