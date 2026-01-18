@@ -25,7 +25,6 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async session({ session, user }) {
-      console.log("Session callback:", session, user);
       const [googleAccount] = await prisma.account.findMany({
         where: { userId: user.id, provider: "google" },
       })

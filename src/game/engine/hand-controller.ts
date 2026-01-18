@@ -11,6 +11,7 @@ import {
 } from "../state/game-manager";
 import { validateAction } from "../rules/action-validator";
 import { distributePots, shouldEndHandByFold, endHandByFold, shouldGoToShowdown } from "./pot-manager";
+import { log } from "../../util/log";
 
 // Helper to create consistent log prefix
 function logPrefix(state: TableState): string {
@@ -158,26 +159,26 @@ export class HandController {
    */
   async startHand(): Promise<TableState> {
     const nextHandNum = this.state.handNumber + 1;
-    console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ╔════════════════════════════════════════════════════════════╗`);
-    console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ║                    STARTING NEW HAND                       ║`);
-    console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ╚════════════════════════════════════════════════════════════╝`);
+    log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ╔════════════════════════════════════════════════════════════╗`);
+    log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ║                    STARTING NEW HAND                       ║`);
+    log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ╚════════════════════════════════════════════════════════════╝`);
 
     try {
       // 1. Remove players who were waiting to leave
       const leavingPlayers = this.removeLeavingPlayers();
       if (leavingPlayers.length > 0) {
-        console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] Removed ${leavingPlayers.length} leaving players: [${leavingPlayers.map(p => p.name).join(', ')}]`);
+        log(`[HandController][Hand #${nextHandNum}][${this.state.id}] Removed ${leavingPlayers.length} leaving players: [${leavingPlayers.map(p => p.name).join(', ')}]`);
         this.emit({ type: 'players-removed', table: this.state, removedPlayers: leavingPlayers });
       }
 
       // 2. Check if we have enough players
-      console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] Players at table: ${this.state.players.length}`);
+      log(`[HandController][Hand #${nextHandNum}][${this.state.id}] Players at table: ${this.state.players.length}`);
       this.state.players.forEach((p, i) => {
-        console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}]   [${i}] ${formatPlayerState(p)}`);
+        log(`[HandController][Hand #${nextHandNum}][${this.state.id}]   [${i}] ${formatPlayerState(p)}`);
       });
 
       if (this.state.players.length < 2) {
-        console.log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ERROR: Not enough players (${this.state.players.length})`);
+        log(`[HandController][Hand #${nextHandNum}][${this.state.id}] ERROR: Not enough players (${this.state.players.length})`);
         throw new Error('Need at least 2 players to start a hand');
       }
 
@@ -185,13 +186,13 @@ export class HandController {
       this.state = this.resetForNewHand(this.state);
       const prefix = logPrefix(this.state);
 
-      console.log(`${prefix} Player states reset for new hand`);
+      log(`${prefix} Player states reset for new hand`);
 
       this.emit({ type: 'hand-started', table: this.state });
 
       // 4. Advance dealer button (find next occupied seat)
       this.state = this.advanceDealerButton(this.state);
-      console.log(`${prefix} Positions: Dealer=${this.state.dealerPosition}, SB=${this.state.smallBlindPosition}, BB=${this.state.bigBlindPosition}`);
+      log(`${prefix} Positions: Dealer=${this.state.dealerPosition}, SB=${this.state.smallBlindPosition}, BB=${this.state.bigBlindPosition}`);
 
       // 5. Shuffle and reset deck
       this.state = {
@@ -200,31 +201,31 @@ export class HandController {
         communityCards: [],
         currentStreet: 'pre-flop'
       };
-      console.log(`${prefix} Deck shuffled (${this.state.deck.length} cards)`);
+      log(`${prefix} Deck shuffled (${this.state.deck.length} cards)`);
 
       // 6. Post blinds
       this.state = postBlinds(this.state);
-      console.log(`${prefix} Blinds posted: SB=${this.state.smallBlind}, BB=${this.state.bigBlind}, pot=${this.state.pot}`);
+      log(`${prefix} Blinds posted: SB=${this.state.smallBlind}, BB=${this.state.bigBlind}, pot=${this.state.pot}`);
       this.emit({ type: 'blinds-posted', table: this.state });
 
       // 7. Deal hole cards
       this.state = dealHoleCards(this.state);
-      console.log(`${prefix} Hole cards dealt:`);
+      log(`${prefix} Hole cards dealt:`);
       this.state.players.forEach(p => {
         const cards = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
-        console.log(`${prefix}   ${p.name}: [${cards}]`);
+        log(`${prefix}   ${p.name}: [${cards}]`);
       });
 
       // 8. Set first active player (after big blind)
       this.state = this.setFirstActivePlayer(this.state);
       const activePlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);
-      console.log(`${prefix} First to act: ${activePlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
+      log(`${prefix} First to act: ${activePlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
 
       this.emit({ type: 'cards-dealt', table: this.state });
 
-      console.log(`${prefix} ════════════════════════════════════════════════════════════`);
-      console.log(`${prefix} Hand #${this.state.handNumber} started successfully`);
-      console.log(`${prefix} ════════════════════════════════════════════════════════════`);
+      log(`${prefix} ════════════════════════════════════════════════════════════`);
+      log(`${prefix} Hand #${this.state.handNumber} started successfully`);
+      log(`${prefix} ════════════════════════════════════════════════════════════`);
 
       return this.getState();
     } catch (error) {
@@ -252,11 +253,11 @@ export class HandController {
     const player = this.state.players.find(p => p.id === action.playerId);
     const playerName = player?.name || action.playerId;
 
-    console.log(`${prefix} ──── ACTION: ${playerName} ${action.type}${action.amount ? ` ${action.amount}` : ''} ────`);
-    console.log(`${prefix} Street: ${this.state.currentStreet}, Pot: ${this.state.pot}, CurrentBet: ${this.state.currentBet}`);
+    log(`${prefix} ──── ACTION: ${playerName} ${action.type}${action.amount ? ` ${action.amount}` : ''} ────`);
+    log(`${prefix} Street: ${this.state.currentStreet}, Pot: ${this.state.pot}, CurrentBet: ${this.state.currentBet}`);
 
     if (player) {
-      console.log(`${prefix} Player state before: ${formatPlayerState(player)}`);
+      log(`${prefix} Player state before: ${formatPlayerState(player)}`);
     } else {
       console.error(`${prefix} ERROR: Player ${action.playerId} not found!`);
     }
@@ -265,28 +266,28 @@ export class HandController {
       // 1. Validate action
       const validation = validateAction(this.state, action.playerId, action);
       if (!validation.valid) {
-        console.log(`${prefix} Action REJECTED: ${validation.error}`);
-        console.log(`${prefix}   Expected active position: ${this.state.activePlayerPosition}`);
-        console.log(`${prefix}   Player position: ${player?.seatPosition}`);
-        console.log(`${prefix}   Player status: ${player?.status}`);
+        log(`${prefix} Action REJECTED: ${validation.error}`);
+        log(`${prefix}   Expected active position: ${this.state.activePlayerPosition}`);
+        log(`${prefix}   Player position: ${player?.seatPosition}`);
+        log(`${prefix}   Player status: ${player?.status}`);
         throw new Error(validation.error || 'Invalid action');
       }
-      console.log(`${prefix} Action VALIDATED`);
+      log(`${prefix} Action VALIDATED`);
 
       // 2. Process action and update state
       this.state = processAction(this.state, action);
 
       const playerAfter = this.state.players.find(p => p.id === action.playerId);
       if (playerAfter) {
-        console.log(`${prefix} Player state after: ${formatPlayerState(playerAfter)}`);
+        log(`${prefix} Player state after: ${formatPlayerState(playerAfter)}`);
       }
-      console.log(`${prefix} State after: Pot=${this.state.pot}, CurrentBet=${this.state.currentBet}, ActivePos=${this.state.activePlayerPosition}`);
+      log(`${prefix} State after: Pot=${this.state.pot}, CurrentBet=${this.state.currentBet}, ActivePos=${this.state.activePlayerPosition}`);
 
       this.emit({ type: 'action-processed', table: this.state, action });
 
       // 3. Check if hand ended by fold
       if (shouldEndHandByFold(this.state)) {
-        console.log(`${prefix} Hand ending by fold (only 1 player remaining)`);
+        log(`${prefix} Hand ending by fold (only 1 player remaining)`);
         const { table, result } = endHandByFold(this.state);
         this.state = table;
         this.emit({ type: 'hand-completed', table: this.state, result });
@@ -295,13 +296,13 @@ export class HandController {
 
       // 4. Check if betting round is complete
       const bettingComplete = isBettingRoundComplete(this.state);
-      console.log(`${prefix} Betting round complete: ${bettingComplete}`);
+      log(`${prefix} Betting round complete: ${bettingComplete}`);
 
       if (bettingComplete) {
         await this.advanceStreet();
       } else {
         const nextPlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);
-        console.log(`${prefix} Next to act: ${nextPlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
+        log(`${prefix} Next to act: ${nextPlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
       }
 
       return this.getState();
@@ -323,12 +324,12 @@ export class HandController {
     const prefix = logPrefix(this.state);
     const currentStreet = this.state.currentStreet;
 
-    console.log(`${prefix} ═══════════════════════════════════════════════════════════`);
-    console.log(`${prefix} ADVANCING STREET from ${currentStreet}`);
+    log(`${prefix} ═══════════════════════════════════════════════════════════`);
+    log(`${prefix} ADVANCING STREET from ${currentStreet}`);
 
     // Check if we should go to showdown
     if (shouldGoToShowdown(this.state)) {
-      console.log(`${prefix} -> Going to showdown (river complete, multiple players)`);
+      log(`${prefix} -> Going to showdown (river complete, multiple players)`);
       await this.showdown();
       return;
     }
@@ -337,19 +338,19 @@ export class HandController {
     switch (currentStreet) {
       case 'pre-flop':
         this.state = dealFlop(this.state);
-        console.log(`${prefix} -> FLOP dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+        log(`${prefix} -> FLOP dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
         break;
       case 'flop':
         this.state = dealTurn(this.state);
-        console.log(`${prefix} -> TURN dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+        log(`${prefix} -> TURN dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
         break;
       case 'turn':
         this.state = dealRiver(this.state);
-        console.log(`${prefix} -> RIVER dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+        log(`${prefix} -> RIVER dealt: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
         break;
       case 'river':
         // After river, go to showdown
-        console.log(`${prefix} -> River complete, going to showdown`);
+        log(`${prefix} -> River complete, going to showdown`);
         await this.showdown();
         return;
       default:
@@ -358,15 +359,15 @@ export class HandController {
     }
 
     // Log player states at start of new street
-    console.log(`${prefix} Player states at ${this.state.currentStreet}:`);
+    log(`${prefix} Player states at ${this.state.currentStreet}:`);
     this.state.players.forEach(p => {
-      console.log(`${prefix}   ${formatPlayerState(p)}`);
+      log(`${prefix}   ${formatPlayerState(p)}`);
     });
 
     // Check if betting round is already complete (e.g., only one active player, rest all-in)
     // This must be checked BEFORE setting active player
     if (isBettingRoundComplete(this.state)) {
-      console.log(`${prefix} Betting round already complete (all-in scenario) - auto-advancing`);
+      log(`${prefix} Betting round already complete (all-in scenario) - auto-advancing`);
       this.emit({ type: 'street-changed', table: this.state, street: this.state.currentStreet });
       await this.advanceStreet();
       return;
@@ -375,7 +376,7 @@ export class HandController {
     // Set first active player for new street
     this.state = this.setFirstActivePlayer(this.state);
     const activePlayer = this.state.players.find(p => p.seatPosition === this.state.activePlayerPosition);
-    console.log(`${prefix} First to act: ${activePlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
+    log(`${prefix} First to act: ${activePlayer?.name || 'none'} (position ${this.state.activePlayerPosition})`);
 
     this.emit({ type: 'street-changed', table: this.state, street: this.state.currentStreet });
 
@@ -383,10 +384,10 @@ export class HandController {
     // automatically advance to the next street until we reach showdown
     if (this.state.activePlayerPosition === null) {
       const playersInHand = this.state.players.filter(p => isPlayerInHand(p));
-      console.log(`${prefix} No active player - ${playersInHand.length} players still in hand`);
+      log(`${prefix} No active player - ${playersInHand.length} players still in hand`);
       if (playersInHand.length > 1) {
         // No one can act but multiple players remain - continue advancing
-        console.log(`${prefix} All-in scenario - auto-advancing to next street`);
+        log(`${prefix} All-in scenario - auto-advancing to next street`);
         await this.advanceStreet();
       }
     }
@@ -402,17 +403,17 @@ export class HandController {
   private async showdown(): Promise<void> {
     const prefix = logPrefix(this.state);
 
-    console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
-    console.log(`${prefix} ║                       SHOWDOWN                             ║`);
-    console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
-    console.log(`${prefix} Community: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
-    console.log(`${prefix} Pot: ${this.state.pot}`);
-    console.log(`${prefix} Players going to showdown:`);
+    log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+    log(`${prefix} ║                       SHOWDOWN                             ║`);
+    log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+    log(`${prefix} Community: [${this.state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+    log(`${prefix} Pot: ${this.state.pot}`);
+    log(`${prefix} Players going to showdown:`);
     this.state.players.forEach(p => {
       const inHand = isPlayerInHand(p);
       const cards = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
       const marker = inHand ? '→' : ' ';
-      console.log(`${prefix} ${marker} ${p.name}: [${cards}] (${p.status}, bet:${p.totalBetInHand}, stack:${p.stack})`);
+      log(`${prefix} ${marker} ${p.name}: [${cards}] (${p.status}, bet:${p.totalBetInHand}, stack:${p.stack})`);
     });
 
     // Update street to showdown - no more actions allowed
@@ -426,9 +427,9 @@ export class HandController {
     const { table, result } = distributePots(this.state);
     this.state = table;
 
-    console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
-    console.log(`${prefix} ║                  HAND #${this.state.handNumber} COMPLETE                        ║`);
-    console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+    log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+    log(`${prefix} ║                  HAND #${this.state.handNumber} COMPLETE                        ║`);
+    log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
 
     this.emit({ type: 'hand-completed', table: this.state, result });
   }

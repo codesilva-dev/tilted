@@ -215,8 +215,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
 
     // Auto-check if possible, otherwise auto-fold
     if (canCheck) {
+      checkSoundRef.current?.play().catch(() => {});
       takeAction({ type: 'check', playerId });
     } else {
+      foldSoundRef.current?.play().catch(() => {});
       takeAction({ type: 'fold', playerId });
     }
   }, [gameState, currentPlayer, isMyTurn, takeAction, playerId]);
@@ -264,15 +266,46 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
   // Turn alert sound - plays when it becomes the player's turn
   const prevIsMyTurnRef = useRef<boolean>(false);
   const turnAlertRef = useRef<HTMLAudioElement | null>(null);
+  const checkSoundRef = useRef<HTMLAudioElement | null>(null);
+  const foldSoundRef = useRef<HTMLAudioElement | null>(null);
+  const fewChipsSoundRef = useRef<HTMLAudioElement | null>(null);
+  const allInChipsSoundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     // Create audio element for turn alert
     turnAlertRef.current = new Audio('/turn-alert.mp3');
     turnAlertRef.current.volume = 0.8;
 
+    // Create audio element for check sound
+    checkSoundRef.current = new Audio('/check-tap.mp3');
+    checkSoundRef.current.volume = 0.6;
+
+    // Create audio element for fold sound
+    foldSoundRef.current = new Audio('/fold-cards.mp3');
+    foldSoundRef.current.volume = 0.6;
+
+    // Create audio elements for chip sounds
+    fewChipsSoundRef.current = new Audio('/few-chips.mp3');
+    fewChipsSoundRef.current.volume = 0.6;
+    allInChipsSoundRef.current = new Audio('/all-in-chips.mp3');
+    allInChipsSoundRef.current.volume = 0.6;
+
     return () => {
       turnAlertRef.current = null;
+      checkSoundRef.current = null;
+      foldSoundRef.current = null;
+      fewChipsSoundRef.current = null;
+      allInChipsSoundRef.current = null;
     };
+  }, []);
+
+  // Play chip sound based on amount (< 200 = few chips, >= 200 = all-in chips)
+  const playChipSound = useCallback((amount: number) => {
+    if (amount < 200) {
+      fewChipsSoundRef.current?.play().catch(() => {});
+    } else {
+      allInChipsSoundRef.current?.play().catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -369,8 +402,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
     // Small delay to make the auto-action visible
     const timer = setTimeout(() => {
       if (canCheck) {
+        checkSoundRef.current?.play().catch(() => {});
         takeAction({ type: 'check', playerId });
       } else {
+        foldSoundRef.current?.play().catch(() => {});
         takeAction({ type: 'fold', playerId });
       }
       setAutoCheckFold(false);
@@ -846,7 +881,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                   <div className="w-1/2 flex flex-col gap-2">
                     {/* Fold button */}
                     <button
-                      onClick={() => takeActionWithLog({ type: 'fold', playerId })}
+                      onClick={() => {
+                        foldSoundRef.current?.play().catch(() => {});
+                        takeActionWithLog({ type: 'fold', playerId });
+                      }}
                       disabled={isDisabled}
                       className={`w-full py-3 rounded-lg font-semibold transition-all ${
                         isDisabled
@@ -861,7 +899,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                     <div className="flex gap-1">
                       {canCheck ? (
                         <button
-                          onClick={() => takeActionWithLog({ type: 'check', playerId })}
+                          onClick={() => {
+                            checkSoundRef.current?.play().catch(() => {});
+                            takeActionWithLog({ type: 'check', playerId });
+                          }}
                           disabled={isDisabled}
                           className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
                             isDisabled
@@ -873,7 +914,10 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
                         </button>
                       ) : (
                         <button
-                          onClick={() => takeActionWithLog({ type: 'call', playerId })}
+                          onClick={() => {
+                            playChipSound(amountToCall);
+                            takeActionWithLog({ type: 'call', playerId });
+                          }}
                           disabled={isDisabled}
                           className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
                             isDisabled
@@ -903,11 +947,14 @@ export default function GamePage({ params }: { params: Promise<{ tableId: string
 
                     {/* Raise/Bet button */}
                     <button
-                      onClick={() => takeActionWithLog({
-                        type: isBet ? 'bet' : 'raise',
-                        playerId,
-                        amount: raiseAmount
-                      })}
+                      onClick={() => {
+                        playChipSound(raiseAmount);
+                        takeActionWithLog({
+                          type: isBet ? 'bet' : 'raise',
+                          playerId,
+                          amount: raiseAmount
+                        });
+                      }}
                       disabled={isDisabled || raiseAmount < minRaise || raiseAmount > maxRaise}
                       className={`w-full py-3 rounded-lg font-semibold transition-all ${
                         isDisabled

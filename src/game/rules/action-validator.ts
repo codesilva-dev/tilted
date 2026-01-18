@@ -1,3 +1,4 @@
+import { log } from "../../util/log";
 import { TableState, GameAction, ActionType, BettingLimits } from "../types/game-state";
 
 /**
@@ -26,29 +27,29 @@ export function validateAction(
 
   // No actions allowed during showdown - hand is complete
   if (state.currentStreet === 'showdown') {
-    console.log(`${prefix} REJECTED ${playerName} ${action.type}: Hand is complete (street=showdown)`);
+    log(`${prefix} REJECTED ${playerName} ${action.type}: Hand is complete (street=showdown)`);
     return { valid: false, error: 'Hand is complete - no actions allowed' };
   }
 
   // Player must exist
   if (!player) {
-    console.log(`${prefix} REJECTED ${playerId} ${action.type}: Player not found`);
-    console.log(`${prefix}   Known players: [${state.players.map(p => `${p.name}(${p.id})`).join(', ')}]`);
+    log(`${prefix} REJECTED ${playerId} ${action.type}: Player not found`);
+    log(`${prefix}   Known players: [${state.players.map(p => `${p.name}(${p.id})`).join(', ')}]`);
     return { valid: false, error: 'Player not found' };
   }
 
   // Must be player's turn
   if (state.activePlayerPosition !== player.seatPosition) {
     const activePlayer = state.players.find(p => p.seatPosition === state.activePlayerPosition);
-    console.log(`${prefix} REJECTED ${playerName} ${action.type}: Not their turn`);
-    console.log(`${prefix}   Active position: ${state.activePlayerPosition} (${activePlayer?.name || 'none'})`);
-    console.log(`${prefix}   Player position: ${player.seatPosition}`);
+    log(`${prefix} REJECTED ${playerName} ${action.type}: Not their turn`);
+    log(`${prefix}   Active position: ${state.activePlayerPosition} (${activePlayer?.name || 'none'})`);
+    log(`${prefix}   Player position: ${player.seatPosition}`);
     return { valid: false, error: 'Not your turn' };
   }
 
   // Player must be active
   if (player.status !== 'active') {
-    console.log(`${prefix} REJECTED ${playerName} ${action.type}: Player status is '${player.status}' (not active)`);
+    log(`${prefix} REJECTED ${playerName} ${action.type}: Player status is '${player.status}' (not active)`);
     return { valid: false, error: 'Player is not active' };
   }
 
@@ -85,9 +86,9 @@ export function validateAction(
   }
 
   if (!result.valid) {
-    console.log(`${prefix} REJECTED ${playerName} ${action.type}${action.amount ? ` ${action.amount}` : ''}: ${result.error}`);
-    console.log(`${prefix}   State: street=${state.currentStreet}, pot=${state.pot}, currentBet=${state.currentBet}`);
-    console.log(`${prefix}   Player: status=${player.status}, currentBet=${player.currentBet}, stack=${player.stack}`);
+    log(`${prefix} REJECTED ${playerName} ${action.type}${action.amount ? ` ${action.amount}` : ''}: ${result.error}`);
+    log(`${prefix}   State: street=${state.currentStreet}, pot=${state.pot}, currentBet=${state.currentBet}`);
+    log(`${prefix}   Player: status=${player.status}, currentBet=${player.currentBet}, stack=${player.stack}`);
   }
 
   return result;

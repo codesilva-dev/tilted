@@ -262,12 +262,12 @@ socket.emit('join-table', {
 
 // Listen for game state
 socket.on('game-state', (data) => {
-  console.log('Current game state:', data.table);
+  log('Current game state:', data.table);
 });
 
 // Listen for actions
 socket.on('action-processed', (data) => {
-  console.log('Action:', data.action.type, 'by', data.action.playerId);
+  log('Action:', data.action.type, 'by', data.action.playerId);
 });
 
 // Take an action
@@ -348,8 +348,8 @@ export function useGameSocket(tableId: string, playerId: string, playerName: str
 // Open browser console at http://localhost:3000
 const socket = io('http://localhost:3001');
 
-socket.on('connect', () => console.log('Connected!'));
-socket.on('game-state', (data) => console.log('State:', data));
+socket.on('connect', () => log('Connected!'));
+socket.on('game-state', (data) => log('State:', data));
 
 socket.emit('join-table', {
   tableId: 'test-1',

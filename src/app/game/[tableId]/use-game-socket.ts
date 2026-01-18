@@ -13,8 +13,8 @@ function startHttpKeepAlive(url: string): () => void {
 
   const ping = () => {
     fetch(healthUrl, { method: 'GET', mode: 'cors' })
-      .then(res => console.log('[KeepAlive] Health ping:', res.status))
-      .catch(err => console.log('[KeepAlive] Health ping failed:', err.message));
+      .then(res => console.log(`[KeepAlive] Health ping: ${res.status}`))
+      .catch(err => console.log(`[KeepAlive] Health ping failed: ${err.message}`));
   };
 
   // Ping immediately, then every 5 minutes
@@ -62,7 +62,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
   const resetCountdownRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    console.log('[Socket] Connecting to', SOCKET_URL);
+    console.log(`[Socket] Connecting to ${SOCKET_URL}`);
 
     // Start HTTP keep-alive to prevent Render from spinning down
     const stopKeepAlive = startHttpKeepAlive(SOCKET_URL);
@@ -82,7 +82,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[Socket] Connected!', socket.recovered ? '(recovered)' : '(fresh)');
+      console.log(`[Socket] Connected! ${socket.recovered ? '(recovered)' : '(fresh)'}`);
       setIsConnected(true);
       setError(null);
 
@@ -91,7 +91,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected, reason:', reason);
+      console.log(`[Socket] Disconnected, reason: ${reason}`);
       setIsConnected(false);
 
       // If the server forcefully disconnected us, try to reconnect
@@ -103,15 +103,15 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
 
     // Manager-level reconnection events
     socket.io.on('reconnect', (attemptNumber) => {
-      console.log('[Socket] Reconnected after', attemptNumber, 'attempts');
+      console.log(`[Socket] Reconnected after ${attemptNumber} attempts`);
     });
 
     socket.io.on('reconnect_attempt', (attemptNumber) => {
-      console.log('[Socket] Reconnection attempt', attemptNumber);
+      console.log(`[Socket] Reconnection attempt ${attemptNumber}`);
     });
 
     socket.io.on('reconnect_error', (error) => {
-      console.error('[Socket] Reconnection error:', error.message);
+      console.error(`[Socket] Reconnection error: ${error.message}`);
     });
 
     socket.io.on('reconnect_failed', () => {
@@ -120,14 +120,14 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     });
 
     socket.on('connect_error', (err: Error) => {
-      console.error('[Socket] Connection error:', err.message);
+      console.error(`[Socket] Connection error: ${err.message}`);
       setError(`Connection failed: ${err.message}`);
       setIsConnected(false);
     });
 
     // Game state events
     socket.on('game-state', (data: { table: TableState }) => {
-      console.log('[Socket] Game state received');
+      console.log(`[Socket] Game state received`);
       setGameState(data.table);
 
       // Check if we're seated
@@ -136,73 +136,73 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     });
 
     socket.on('seats-available', (data: { availableSeats: number[]; occupiedSeats: number[] }) => {
-      console.log('[Socket] Seats available:', data.availableSeats);
+      console.log(`[Socket] Seats available: ${data.availableSeats}`);
       setAvailableSeats(data.availableSeats);
     });
 
     socket.on('spectator-joined', (data: { playerId: string; playerName: string; spectatorCount: number }) => {
-      console.log('[Socket] Spectator joined:', data.playerName);
+      console.log(`[Socket] Spectator joined: ${data.playerName}`);
     });
 
     socket.on('player-seated', (data: { playerId: string; playerName: string; seatPosition: number; stack: number }) => {
-      console.log('[Socket] Player seated:', data.playerName, 'at seat', data.seatPosition);
+      console.log(`[Socket] Player seated: ${data.playerName} at seat ${data.seatPosition}`);
       // Game state is already broadcast by server, no need to request it again
     });
 
     socket.on('player-left-seat', (data: { playerId: string; seatPosition: number }) => {
-      console.log('[Socket] Player left seat:', data.seatPosition);
+      console.log(`[Socket] Player left seat: ${data.seatPosition}`);
       // Game state is already broadcast by server, no need to request it again
     });
 
     socket.on('player-left-room', (data: { playerId: string }) => {
-      console.log('[Socket] Player left room:', data.playerId);
+      console.log(`[Socket] Player left room: ${data.playerId}`);
       // Game state is already broadcast by server, no need to request it again
     });
 
     socket.on('player-disconnected', (data: { playerId: string }) => {
-      console.log('[Socket] Player disconnected:', data.playerId);
+      console.log(`[Socket] Player disconnected: ${data.playerId}`);
       // Game state is already broadcast by server, no need to request it again
     });
 
     // Hand events
     socket.on('hand-started', (data: { table: TableState }) => {
-      console.log('[Socket] Hand started!');
+      console.log(`[Socket] Hand started!`);
       setGameState(data.table);
     });
 
     socket.on('blinds-posted', (data: { table: TableState }) => {
-      console.log('[Socket] Blinds posted');
+      console.log(`[Socket] Blinds posted`);
       setGameState(data.table);
     });
 
     socket.on('cards-dealt', (data: { table: TableState }) => {
-      console.log('[Socket] Cards dealt');
+      console.log(`[Socket] Cards dealt`);
       setGameState(data.table);
     });
 
     socket.on('action-processed', (data: { table: TableState; action: GameAction }) => {
-      console.log('[Socket] Action:', data.action.type);
+      console.log(`[Socket] Action: ${data.action.type}`);
       setGameState(data.table);
     });
 
     socket.on('street-changed', (data: { table: TableState; street: string }) => {
-      console.log('[Socket] Street changed to:', data.street);
+      console.log(`[Socket] Street changed to: ${data.street}`);
       setGameState(data.table);
     });
 
     socket.on('hand-completed', (data: { table: TableState; result: any }) => {
-      console.log('[Socket] Hand completed!');
+      console.log(`[Socket] Hand completed!`);
       setGameState(data.table);
     });
 
     socket.on('players-removed', (data: { playerIds: string[] }) => {
-      console.log('[Socket] Players removed:', data.playerIds);
+      console.log(`[Socket] Players removed: ${data.playerIds}`);
       // Game state will be updated in the game-state event that follows
     });
 
     // Table reset countdown (when not enough players after hand ends)
     socket.on('table-resetting', (data: { countdown: number; reason: string }) => {
-      console.log('[Socket] Table resetting in', data.countdown, 'seconds:', data.reason);
+      console.log(`[Socket] Table resetting in ${data.countdown} seconds: ${data.reason}`);
       setTableResetCountdown(data.countdown);
 
       // Start client-side countdown
@@ -224,7 +224,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     });
 
     socket.on('table-reset-cancelled', () => {
-      console.log('[Socket] Table reset cancelled');
+      console.log(`[Socket] Table reset cancelled`);
       if (resetCountdownRef.current) {
         clearInterval(resetCountdownRef.current);
         resetCountdownRef.current = null;
@@ -234,7 +234,7 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
 
     // Error handlers
     socket.on('join-room-error', (data: { message: string }) => {
-      console.error('[Socket] Join room error:', data.message);
+      console.error(`[Socket] Join room error: ${data.message}`);
       // If table not found after reconnect, server may have restarted
       if (data.message.includes('Table not found')) {
         setTableNotFound(true);
@@ -245,30 +245,30 @@ export function useGameSocketV2(options: UseGameSocketOptions): UseGameSocketRet
     });
 
     socket.on('take-seat-error', (data: { message: string }) => {
-      console.error('[Socket] Take seat error:', data.message);
+      console.error(`[Socket] Take seat error: ${data.message}`);
       setError(`Cannot sit: ${data.message}`);
       setTimeout(() => setError(null), 5000);
     });
 
     socket.on('leave-seat-error', (data: { message: string }) => {
-      console.error('[Socket] Leave seat error:', data.message);
+      console.error(`[Socket] Leave seat error: ${data.message}`);
       setError(`Cannot stand: ${data.message}`);
       setTimeout(() => setError(null), 3000);
     });
 
     socket.on('action-error', (data: { message: string }) => {
-      console.error('[Socket] Action error:', data.message);
+      console.error(`[Socket] Action error: ${data.message}`);
       setError(`Invalid action: ${data.message}`);
       setTimeout(() => setError(null), 3000);
     });
 
     socket.on('game-error', (data: { message: string }) => {
-      console.error('[Socket] Game error:', data.message);
+      console.error(`[Socket] Game error: ${data.message}`);
       setError(`Game error: ${data.message}`);
     });
 
     return () => {
-      console.log('[Socket] Cleaning up...');
+      console.log(`[Socket] Cleaning up...`);
       stopKeepAlive();
       if (resetCountdownRef.current) {
         clearInterval(resetCountdownRef.current);

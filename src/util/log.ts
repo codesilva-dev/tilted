@@ -4,7 +4,6 @@ dotenv.config();
 import { PostHog } from "posthog-node";
 
 const POSTHOG_API_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY || "";
-console.log("PostHog Key:", POSTHOG_API_KEY);
 
 const client = new PostHog(POSTHOG_API_KEY, {
   host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
@@ -24,8 +23,9 @@ function hogLog(type: string, message: string): void {
       event: message,
       properties: { button_color: "red" },
     });
-  }
+  } else {
   console.log(message);
+  }
 }
 
 

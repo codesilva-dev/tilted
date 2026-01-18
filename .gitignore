@@ -48,3 +48,4 @@ CLAUDE.md
 # Ignore restart script
 restart-app.ps1
 .vscode/tasks.json
+/dist/

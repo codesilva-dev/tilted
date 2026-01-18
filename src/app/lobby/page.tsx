@@ -15,8 +15,8 @@ function startHttpKeepAlive(url: string): () => void {
 
   const ping = () => {
     fetch(healthUrl, { method: 'GET', mode: 'cors' })
-      .then(res => console.log('[KeepAlive] Health ping:', res.status))
-      .catch(err => console.log('[KeepAlive] Health ping failed:', err.message));
+      .then(res => console.log(`[KeepAlive] Health ping: ${res.status}`))
+      .catch(err => console.log(`[KeepAlive] Health ping failed: ${err.message}`));
   };
 
   // Ping immediately, then every 5 minutes
@@ -61,39 +61,39 @@ export default function LobbyPage() {
     setSocket(socketInstance);
 
     socketInstance.on('connect', () => {
-      console.log('[Lobby] Connected to server');
+      console.log(`[Lobby] Connected to server`);
       setIsConnected(true);
       // Request tables list
       socketInstance.emit('get-tables');
     });
 
     socketInstance.on('disconnect', () => {
-      console.log('[Lobby] Disconnected');
+      console.log(`[Lobby] Disconnected`);
       setIsConnected(false);
     });
 
     socketInstance.on('tables-list', (data: { tables: TableInfo[] }) => {
-      console.log('[Lobby] Received tables:', data.tables);
+      console.log(`[Lobby] Received tables: ${JSON.stringify(data.tables)}`);
       setTables(data.tables);
     });
 
     socketInstance.on('table-created', (data: { table: TableInfo }) => {
-      console.log('[Lobby] New table created:', data.table);
+      console.log(`[Lobby] New table created: ${JSON.stringify(data.table)}`);
       setTables(prev => [...prev, data.table]);
     });
 
     socketInstance.on('table-deleted', (data: { tableId: string }) => {
-      console.log('[Lobby] Table deleted:', data.tableId);
+      console.log(`[Lobby] Table deleted: ${data.tableId}`);
       setTables(prev => prev.filter(t => t.tableId !== data.tableId));
     });
 
     socketInstance.on('create-table-error', (data: { message: string }) => {
-      console.error('[Lobby] Create table error:', data.message);
+      console.error(`[Lobby] Create table error: ${data.message}`);
       alert(`Failed to create table: ${data.message}`);
     });
 
     socketInstance.on('table-created-success', (data: { tableId: string }) => {
-      console.log('[Lobby] Table created successfully:', data.tableId);
+      console.log(`[Lobby] Table created successfully: ${data.tableId}`);
       // Navigate to the new table
       router.push(`/game/${data.tableId}`);
     });

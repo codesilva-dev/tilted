@@ -2,6 +2,7 @@ import { describe, test, expect } from '@jest/globals';
 import { HandController } from './hand-controller';
 import { createInitialTableState, createPlayer, GameAction } from '../types/game-state';
 import { shuffleDeck } from '../core/cards';
+import { log } from '../../util/log';
 
 describe('HandController - All-in Auto-Advance Tests', () => {
   /**
@@ -138,12 +139,12 @@ describe('HandController - All-in Auto-Advance Tests', () => {
     // Alice should have won everything
     expect(aliceFinal.stack).toBeGreaterThan(1300);
 
-    console.log('=== ALL-IN AUTO-ADVANCE TEST RESULTS ===');
-    console.log('Final street:', state.currentStreet);
-    console.log('Community cards:', state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' '));
-    console.log('Alice stack:', aliceFinal.stack, '(started with 1300)');
-    console.log('Bob stack:', bobFinal.stack, '(started with 1000)');
-    console.log('Events emitted:', events.join(', '));
+    console.log(`=== ALL-IN AUTO-ADVANCE TEST RESULTS ===`);
+    console.log(`Final street: ${state.currentStreet}`);
+    console.log(`Community cards: ${state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}`);
+    console.log(`Alice stack: ${aliceFinal.stack} (started with 1300)`);
+    console.log(`Bob stack: ${bobFinal.stack} (started with 1000)`);
+    console.log(`Events emitted: ${events.join(', ')}`);
   });
 
   test('auto-advances through multiple streets when all-in on pre-flop', async () => {
@@ -208,10 +209,10 @@ describe('HandController - All-in Auto-Advance Tests', () => {
     expect(streetChanges).toContain('turn');
     expect(streetChanges).toContain('river');
 
-    console.log('=== PRE-FLOP ALL-IN TEST RESULTS ===');
-    console.log('Street progression:', streetChanges.join(' -> '));
-    console.log('Final street:', state.currentStreet);
-    console.log('Community cards:', state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' '));
+    console.log(`=== PRE-FLOP ALL-IN TEST RESULTS ===`);
+    console.log(`Street progression: ${streetChanges.join(' -> ')}`);
+    console.log(`Final street: ${state.currentStreet}`);
+    console.log(`Community cards: ${state.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}`);
   });
 });
 
@@ -238,7 +239,7 @@ describe('HandController - Complex Integration Tests', () => {
    * Tests proper 3-pot split with multiple all-ins and side pot calculations
    */
   test('THE HOLY GRAIL: Complete complex hand with multiple all-ins and side pots', async () => {
-    const table = createInitialTableState('t1', 100, 200);
+    const table = createInitialTableState('t1','test', 100, 200);
 
     // Setup 6 players with specific stacks
     const alice = createPlayer('alice', 'Alice', 2, 500);    // Short stack, will win main pot (pot 1)
@@ -290,12 +291,12 @@ describe('HandController - Complex Integration Tests', () => {
     ];
 
     console.log('\n=== STARTING STACKS ===');
-    console.log('Alice:', alice.stack, '(will win pot 1 - main pot with Royal Flush)');
-    console.log('Frank:', frank.stack, '(will win pot 2 - side pot 1 with Straight Flush)');
-    console.log('Bob:', bob.stack, '(will lose at showdown - Straight < Flush)');
-    console.log('Charlie:', charlie.stack, '(will win pot 3 - side pot 2 with Flush > Straight)');
-    console.log('Diana:', diana.stack, '(will fold on turn)');
-    console.log('Eve:', eve.stack, '(will fold on flop)');
+    console.log(`Alice: ${alice.stack} (will win pot 1 - main pot with Royal Flush)`);
+    console.log(`Frank: ${frank.stack} (will win pot 2 - side pot 1 with Straight Flush)`);
+    console.log(`Bob: ${bob.stack} (will lose at showdown - Straight < Flush)`);
+    console.log(`Charlie: ${charlie.stack} (will win pot 3 - side pot 2 with Flush > Straight)`);
+    console.log(`Diana: ${diana.stack} (will fold on turn)`);
+    console.log(`Eve: ${eve.stack} (will fold on flop)`);
 
     // PRE-FLOP ACTION
     console.log('\n=== PRE-FLOP ===');
@@ -574,7 +575,7 @@ describe('HandController - Complex Integration Tests', () => {
   });
 
   test('validates minimum raise amounts', async () => {
-    const table = createInitialTableState('t1', 100, 200);
+    const table = createInitialTableState('t1', 'test', 100, 200);
     const alice = createPlayer('alice', 'Alice', 0, 10000);
     const bob = createPlayer('bob', 'Bob', 1, 10000);
     table.players.push(alice, bob);
@@ -617,7 +618,7 @@ describe('HandController - Complex Integration Tests', () => {
   });
 
   test('handles heads-up with multiple streets and all-in', async () => {
-    const table = createInitialTableState('t1', 100, 200);
+    const table = createInitialTableState('t1', 'test', 100, 200);
     const alice = createPlayer('alice', 'Alice', 0, 1000);
     const bob = createPlayer('bob', 'Bob', 1, 2000);
 
@@ -674,7 +675,7 @@ describe('HandController - Complex Integration Tests', () => {
   });
 
   test('handles three-way all-in with different stack sizes', async () => {
-    const table = createInitialTableState('t1', 100, 200);
+    const table = createInitialTableState('t1', 'test', 100, 200);
 
     // Three players with different stacks
     const alice = createPlayer('alice', 'Alice', 0, 500);   // Short stack, worst hand
@@ -734,7 +735,7 @@ describe('HandController - Complex Integration Tests', () => {
    * This is fundamental to poker rules.
    */
   test('folded player with best hand cannot win - remaining players showdown', async () => {
-    const table = createInitialTableState('t1', 10, 20);
+    const table = createInitialTableState('t1', 'test', 10, 20);
 
     // Setup 3 players
     const alice = createPlayer('alice', 'Alice', 0, 1000);   // Has pair of Aces (best hand, but folds)
@@ -923,7 +924,7 @@ describe('HandController - Complex Integration Tests', () => {
   });
 
   test('properly burns cards before flop, turn, and river', async () => {
-    const table = createInitialTableState('t1', 10, 20);
+    const table = createInitialTableState('t1', 'test', 10, 20);
 
     // Setup 2 players for simplicity
     const alice = createPlayer('alice', 'Alice', 0, 1000);

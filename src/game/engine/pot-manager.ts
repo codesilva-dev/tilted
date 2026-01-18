@@ -1,6 +1,7 @@
 import { TableState, Player, Pot, HandResult, PotResult, isPlayerInHand } from "../types/game-state";
 import { findBestHand, compareHands, type HandRank } from "../core/hand-evaluator";
 import { Card } from "../core/cards";
+import { log } from "../../util/log";
 
 // Helper to create consistent log prefix with hand number
 function logPrefix(table: TableState): string {
@@ -16,11 +17,11 @@ export function calculatePots(table: TableState): Pot[] {
   const pots: Pot[] = [];
   const prefix = logPrefix(table);
 
-  console.log(`${prefix} ===== CALCULATE POTS START =====`);
-  console.log(`${prefix} Table pot: ${table.pot}, Street: ${table.currentStreet}`);
-  console.log(`${prefix} All players state:`);
+  log(`${prefix} ===== CALCULATE POTS START =====`);
+  log(`${prefix} Table pot: ${table.pot}, Street: ${table.currentStreet}`);
+  log(`${prefix} All players state:`);
   table.players.forEach((p, i) => {
-    console.log(`${prefix}   [${i}] ${formatPlayerState(p)} | isInHand: ${isPlayerInHand(p)}`);
+    log(`${prefix}   [${i}] ${formatPlayerState(p)} | isInHand: ${isPlayerInHand(p)}`);
   });
 
   // Include ALL players who contributed chips (including folded players)
@@ -28,14 +29,14 @@ export function calculatePots(table: TableState): Pot[] {
   const playersWhoContributed = table.players.filter(p => p.totalBetInHand > 0);
 
   if (playersWhoContributed.length === 0) {
-    console.log(`${prefix} No players contributed chips, returning empty pots`);
+    log(`${prefix} No players contributed chips, returning empty pots`);
     return pots;
   }
 
   const totalContributed = playersWhoContributed.reduce((sum, p) => sum + p.totalBetInHand, 0);
-  console.log(`${prefix} Players who contributed (${playersWhoContributed.length} total, ${totalContributed} chips):`);
+  log(`${prefix} Players who contributed (${playersWhoContributed.length} total, ${totalContributed} chips):`);
   playersWhoContributed.forEach(p => {
-    console.log(`${prefix}   - ${p.name}: ${p.totalBetInHand} chips (${p.status})`);
+    log(`${prefix}   - ${p.name}: ${p.totalBetInHand} chips (${p.status})`);
   });
 
   // Sort players by total bet amount (ascending)
@@ -48,20 +49,20 @@ export function calculatePots(table: TableState): Pot[] {
     const currentPlayer = sortedPlayers[i];
     const currentBetLevel = currentPlayer.totalBetInHand;
 
-    console.log(`${prefix} Processing [${i}] ${currentPlayer.name}: betLevel=${currentBetLevel}, previousLevel=${previousBetLevel}`);
+    log(`${prefix} Processing [${i}] ${currentPlayer.name}: betLevel=${currentBetLevel}, previousLevel=${previousBetLevel}`);
 
     // Skip if this player bet the same as previous (no new pot needed)
     if (currentBetLevel === previousBetLevel) {
       // Still need to remove this player from remaining
       remainingPlayers = remainingPlayers.filter(p => p.id !== currentPlayer.id);
-      console.log(`${prefix}   -> Same bet level, skipping (remaining: ${remainingPlayers.length})`);
+      log(`${prefix}   -> Same bet level, skipping (remaining: ${remainingPlayers.length})`);
       continue;
     }
 
     const betIncrement = currentBetLevel - previousBetLevel;
     const potAmount = betIncrement * remainingPlayers.length;
 
-    console.log(`${prefix}   -> Increment: ${betIncrement} x ${remainingPlayers.length} players = ${potAmount}`);
+    log(`${prefix}   -> Increment: ${betIncrement} x ${remainingPlayers.length} players = ${potAmount}`);
 
     if (potAmount > 0) {
       // Only include players still in the hand as eligible winners
@@ -72,7 +73,7 @@ export function calculatePots(table: TableState): Pot[] {
 
       const potType = pots.length === 0 ? 'main' : 'side';
       const eligibleNames = remainingPlayers.filter(p => isPlayerInHand(p)).map(p => p.name);
-      console.log(`${prefix}   -> Creating ${potType} pot: ${potAmount} chips, eligible: [${eligibleNames.join(', ')}]`);
+      log(`${prefix}   -> Creating ${potType} pot: ${potAmount} chips, eligible: [${eligibleNames.join(', ')}]`);
 
       pots.push({
         amount: potAmount,
@@ -87,17 +88,17 @@ export function calculatePots(table: TableState): Pot[] {
 
     // If no players remain, we're done
     if (remainingPlayers.length === 0) {
-      console.log(`${prefix}   -> No more players to process`);
+      log(`${prefix}   -> No more players to process`);
       break;
     }
   }
 
   const totalPotAmount = pots.reduce((sum, p) => sum + p.amount, 0);
-  console.log(`${prefix} ===== CALCULATE POTS COMPLETE =====`);
-  console.log(`${prefix} Final pots (${pots.length} pots, ${totalPotAmount} total chips):`);
+  log(`${prefix} ===== CALCULATE POTS COMPLETE =====`);
+  log(`${prefix} Final pots (${pots.length} pots, ${totalPotAmount} total chips):`);
   pots.forEach((p, i) => {
     const eligibleNames = table.players.filter(pl => p.eligiblePlayers.includes(pl.id)).map(pl => pl.name);
-    console.log(`${prefix}   [${i}] ${p.type}: ${p.amount} chips -> [${eligibleNames.join(', ')}]`);
+    log(`${prefix}   [${i}] ${p.type}: ${p.amount} chips -> [${eligibleNames.join(', ')}]`);
   });
 
   // Sanity check: total pots should equal total contributed
@@ -117,15 +118,15 @@ export function determineWinnersForPot(
   const prefix = logPrefix(table);
   const communityStr = communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
 
-  console.log(`${prefix} --- Determining winners for ${pot.type} pot (${pot.amount} chips) ---`);
-  console.log(`${prefix} Community: [${communityStr}]`);
+  log(`${prefix} --- Determining winners for ${pot.type} pot (${pot.amount} chips) ---`);
+  log(`${prefix} Community: [${communityStr}]`);
 
   const eligiblePlayers = players.filter(p => pot.eligiblePlayers.includes(p.id));
 
-  console.log(`${prefix} Eligible players (${eligiblePlayers.length}):`);
+  log(`${prefix} Eligible players (${eligiblePlayers.length}):`);
   eligiblePlayers.forEach(p => {
     const holeStr = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
-    console.log(`${prefix}   - ${p.name}: [${holeStr}] (${p.status})`);
+    log(`${prefix}   - ${p.name}: [${holeStr}] (${p.status})`);
   });
 
   if (eligiblePlayers.length === 0) {
@@ -153,7 +154,7 @@ export function determineWinnersForPot(
       description: 'Unknown (insufficient cards)'
     };
 
-    console.log(`${prefix} Single winner: ${player.name} wins ${pot.amount} with ${handRank.description}`);
+    log(`${prefix} Single winner: ${player.name} wins ${pot.amount} with ${handRank.description}`);
     return {
       pot,
       winners: [{
@@ -166,7 +167,7 @@ export function determineWinnersForPot(
   }
 
   // Evaluate all hands
-  console.log(`${prefix} Evaluating ${eligiblePlayers.length} hands:`);
+  log(`${prefix} Evaluating ${eligiblePlayers.length} hands:`);
   const evaluatedPlayers = eligiblePlayers.map(player => {
     const allCards = [...player.holeCards, ...communityCards];
     const holeCardsStr = player.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
@@ -184,40 +185,40 @@ export function determineWinnersForPot(
     };
 
     const cardsUsed = handRank.cards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
-    console.log(`${prefix}   ${player.name}: ${handRank.description} (value: ${handRank.value})`);
-    console.log(`${prefix}     Hole: [${holeCardsStr}] -> Best 5: [${cardsUsed}]`);
+    log(`${prefix}   ${player.name}: ${handRank.description} (value: ${handRank.value})`);
+    log(`${prefix}     Hole: [${holeCardsStr}] -> Best 5: [${cardsUsed}]`);
 
     return { player, handRank };
   });
 
   // Find the best hand
-  console.log(`${prefix} Finding best hand among ${evaluatedPlayers.length} players...`);
+  log(`${prefix} Finding best hand among ${evaluatedPlayers.length} players...`);
   let bestHand = evaluatedPlayers[0].handRank;
   let bestPlayer = evaluatedPlayers[0].player.name;
 
   for (const evaluated of evaluatedPlayers) {
     const comparison = compareHands(evaluated.handRank, bestHand);
-    console.log(`${prefix}   Compare ${evaluated.player.name}(${evaluated.handRank.value}) vs best(${bestHand.value}): diff=${comparison}`);
+    log(`${prefix}   Compare ${evaluated.player.name}(${evaluated.handRank.value}) vs best(${bestHand.value}): diff=${comparison}`);
     if (comparison > 0) {
-      console.log(`${prefix}   -> ${evaluated.player.name} is new best!`);
+      log(`${prefix}   -> ${evaluated.player.name} is new best!`);
       bestHand = evaluated.handRank;
       bestPlayer = evaluated.player.name;
     }
   }
 
-  console.log(`${prefix} Best hand: ${bestPlayer} with ${bestHand.description} (value: ${bestHand.value})`);
+  log(`${prefix} Best hand: ${bestPlayer} with ${bestHand.description} (value: ${bestHand.value})`);
 
   // Find all players with the best hand (for split pots)
-  console.log(`${prefix} Checking for ties with best hand...`);
+  log(`${prefix} Checking for ties with best hand...`);
   const winners = evaluatedPlayers.filter(evaluated => {
     const comparison = compareHands(evaluated.handRank, bestHand);
     const isTied = comparison === 0;
-    console.log(`${prefix}   ${evaluated.player.name}(${evaluated.handRank.value}) vs best(${bestHand.value}): diff=${comparison}, tied=${isTied}`);
+    log(`${prefix}   ${evaluated.player.name}(${evaluated.handRank.value}) vs best(${bestHand.value}): diff=${comparison}, tied=${isTied}`);
     return isTied;
   });
 
   const winnerNames = winners.map(w => w.player.name);
-  console.log(`${prefix} Winner(s): [${winnerNames.join(', ')}]${winners.length > 1 ? ' (SPLIT POT)' : ''}`);
+  log(`${prefix} Winner(s): [${winnerNames.join(', ')}]${winners.length > 1 ? ' (SPLIT POT)' : ''}`);
 
   // Calculate amount each winner gets
   const amountPerWinner = Math.floor(pot.amount / winners.length);
@@ -235,7 +236,7 @@ export function determineWinnersForPot(
   };
 
   if (result.wasSplit) {
-    console.log(`${prefix} Split: ${amountPerWinner} each${remainder > 0 ? ` (+${remainder} odd chip to ${winners[0].player.name})` : ''}`);
+    log(`${prefix} Split: ${amountPerWinner} each${remainder > 0 ? ` (+${remainder} odd chip to ${winners[0].player.name})` : ''}`);
   }
 
   return result;
@@ -244,22 +245,22 @@ export function determineWinnersForPot(
 export function distributePots(table: TableState): { table: TableState; result: HandResult } {
   const prefix = logPrefix(table);
 
-  console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
-  console.log(`${prefix} ║                    DISTRIBUTE POTS                         ║`);
-  console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
-  console.log(`${prefix} Table pot: ${table.pot}, Street: ${table.currentStreet}`);
-  console.log(`${prefix} Community cards: [${table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+  log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+  log(`${prefix} ║                    DISTRIBUTE POTS                         ║`);
+  log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+  log(`${prefix} Table pot: ${table.pot}, Street: ${table.currentStreet}`);
+  log(`${prefix} Community cards: [${table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
 
   // Log full player state at start of distribution
-  console.log(`${prefix} ════════════════════════════════════════════════════════════`);
-  console.log(`${prefix} SHOWDOWN DETAILS:`);
-  console.log(`${prefix} Board: [${table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
-  console.log(`${prefix} Players:`);
+  log(`${prefix} ════════════════════════════════════════════════════════════`);
+  log(`${prefix} SHOWDOWN DETAILS:`);
+  log(`${prefix} Board: [${table.communityCards.map(c => `${c.rank}${c.suit[0]}`).join(' ')}]`);
+  log(`${prefix} Players:`);
   table.players.forEach((p, i) => {
     const holeStr = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
-    console.log(`${prefix}   [${i}] ${p.name}: [${holeStr}] | status=${p.status}, bet=${p.totalBetInHand}, stack=${p.stack}`);
+    log(`${prefix}   [${i}] ${p.name}: [${holeStr}] | status=${p.status}, bet=${p.totalBetInHand}, stack=${p.stack}`);
   });
-  console.log(`${prefix} ════════════════════════════════════════════════════════════`);
+  log(`${prefix} ════════════════════════════════════════════════════════════`);
 
   const pots = calculatePots(table);
   const potResults: PotResult[] = [];
@@ -270,10 +271,10 @@ export function distributePots(table: TableState): { table: TableState; result: 
   // First, evaluate hands for all players who went to showdown
   const playersInShowdown = table.players.filter(p => isPlayerInHand(p) && p.holeCards.length > 0);
 
-  console.log(`${prefix} Players going to showdown (${playersInShowdown.length}):`);
+  log(`${prefix} Players going to showdown (${playersInShowdown.length}):`);
   playersInShowdown.forEach(p => {
     const holeStr = p.holeCards.map(c => `${c.rank}${c.suit[0]}`).join(' ');
-    console.log(`${prefix}   - ${p.name}: [${holeStr}] (${p.status})`);
+    log(`${prefix}   - ${p.name}: [${holeStr}] (${p.status})`);
   });
 
   // Verify we have community cards
@@ -285,19 +286,19 @@ export function distributePots(table: TableState): { table: TableState; result: 
     const allCards = [...player.holeCards, ...table.communityCards];
     if (allCards.length === 7) {
       player.handRank = findBestHand(allCards);
-      console.log(`${prefix} Evaluated ${player.name}: ${player.handRank.description}`);
+      log(`${prefix} Evaluated ${player.name}: ${player.handRank.description}`);
     } else {
       console.error(`${prefix} ERROR: ${player.name} has ${allCards.length} cards (expected 7)`);
     }
   }
 
   // Determine winners for each pot
-  console.log(`${prefix} Processing ${pots.length} pot(s)...`);
+  log(`${prefix} Processing ${pots.length} pot(s)...`);
   for (let i = 0; i < pots.length; i++) {
     const pot = pots[i];
     const isContestedPot = pot.eligiblePlayers.length >= 2;
     const potLabel = isContestedPot ? pot.type : `${pot.type} (refund)`;
-    console.log(`${prefix} === Pot ${i + 1}/${pots.length}: ${potLabel} (${pot.amount} chips) ===`);
+    log(`${prefix} === Pot ${i + 1}/${pots.length}: ${potLabel} (${pot.amount} chips) ===`);
 
     const potResult = determineWinnersForPot(pot, table.players, table.communityCards, table);
     potResults.push(potResult);
@@ -311,7 +312,7 @@ export function distributePots(table: TableState): { table: TableState; result: 
         const oldStack = player.stack;
         player.stack += winner.amountWon;
         const actionLabel = isContestedPot ? 'AWARD' : 'REFUND';
-        console.log(`${prefix} ${actionLabel}: ${player.name} +${winner.amountWon} (${oldStack} -> ${player.stack})`);
+        log(`${prefix} ${actionLabel}: ${player.name} +${winner.amountWon} (${oldStack} -> ${player.stack})`);
         totalDistributed += winner.amountWon;
         // Only mark as winner if they won a contested pot
         if (isContestedPot) {
@@ -335,18 +336,18 @@ export function distributePots(table: TableState): { table: TableState; result: 
   };
 
   // Final summary
-  console.log(`${prefix} ════════════════════════════════════════════════════════════`);
-  console.log(`${prefix} DISTRIBUTION SUMMARY:`);
-  console.log(`${prefix}   Total distributed: ${totalDistributed} chips`);
+  log(`${prefix} ════════════════════════════════════════════════════════════`);
+  log(`${prefix} DISTRIBUTION SUMMARY:`);
+  log(`${prefix}   Total distributed: ${totalDistributed} chips`);
   const actualWinners = Array.from(winnerIds).map(id => {
     const p = table.players.find(pl => pl.id === id);
     return p ? p.name : id;
   });
-  console.log(`${prefix}   Actual winners: [${actualWinners.length > 0 ? actualWinners.join(', ') : 'none (all refunds)'}]`);
-  console.log(`${prefix} Final stacks:`);
+  log(`${prefix}   Actual winners: [${actualWinners.length > 0 ? actualWinners.join(', ') : 'none (all refunds)'}]`);
+  log(`${prefix} Final stacks:`);
   table.players.forEach(p => {
     const marker = p.isWinner ? ' ★ WINNER' : '';
-    console.log(`${prefix}   - ${p.name}: ${p.stack}${marker}`);
+    log(`${prefix}   - ${p.name}: ${p.stack}${marker}`);
   });
 
   // Sanity check
@@ -354,9 +355,9 @@ export function distributePots(table: TableState): { table: TableState; result: 
     console.error(`${prefix} WARNING: Distributed ${totalDistributed} but table pot was ${table.pot}`);
   }
 
-  console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
-  console.log(`${prefix} ║                  END DISTRIBUTE POTS                       ║`);
-  console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+  log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+  log(`${prefix} ║                  END DISTRIBUTE POTS                       ║`);
+  log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
 
   return {
     table: {
@@ -371,19 +372,19 @@ export function distributePots(table: TableState): { table: TableState; result: 
 export function endHandByFold(table: TableState): { table: TableState; result: HandResult } {
   const prefix = logPrefix(table);
 
-  console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
-  console.log(`${prefix} ║                    END HAND BY FOLD                        ║`);
-  console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
-  console.log(`${prefix} Pot: ${table.pot}, Street: ${table.currentStreet}`);
+  log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+  log(`${prefix} ║                    END HAND BY FOLD                        ║`);
+  log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+  log(`${prefix} Pot: ${table.pot}, Street: ${table.currentStreet}`);
 
   // Log all player states
-  console.log(`${prefix} All players:`);
+  log(`${prefix} All players:`);
   table.players.forEach((p, i) => {
-    console.log(`${prefix}   [${i}] ${formatPlayerState(p)} | isInHand: ${isPlayerInHand(p)}`);
+    log(`${prefix}   [${i}] ${formatPlayerState(p)} | isInHand: ${isPlayerInHand(p)}`);
   });
 
   const playersInHand = table.players.filter(p => isPlayerInHand(p));
-  console.log(`${prefix} Players still in hand: [${playersInHand.map(p => p.name).join(', ')}] (${playersInHand.length})`);
+  log(`${prefix} Players still in hand: [${playersInHand.map(p => p.name).join(', ')}] (${playersInHand.length})`);
 
   if (playersInHand.length !== 1) {
     console.error(`${prefix} ERROR: Expected 1 player in hand, found ${playersInHand.length}`);
@@ -392,8 +393,8 @@ export function endHandByFold(table: TableState): { table: TableState; result: H
 
   const winner = playersInHand[0];
   const oldStack = winner.stack;
-  console.log(`${prefix} Winner by fold: ${winner.name}`);
-  console.log(`${prefix} AWARD: ${winner.name} +${table.pot} (${oldStack} -> ${oldStack + table.pot})`);
+  log(`${prefix} Winner by fold: ${winner.name}`);
+  log(`${prefix} AWARD: ${winner.name} +${table.pot} (${oldStack} -> ${oldStack + table.pot})`);
 
   // Create a single pot with the winner
   const pot: Pot = {
@@ -436,9 +437,9 @@ export function endHandByFold(table: TableState): { table: TableState; result: H
   // Mark winner
   winner.isWinner = true;
 
-  console.log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
-  console.log(`${prefix} ║                END HAND BY FOLD COMPLETE                   ║`);
-  console.log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
+  log(`${prefix} ╔════════════════════════════════════════════════════════════╗`);
+  log(`${prefix} ║                END HAND BY FOLD COMPLETE                   ║`);
+  log(`${prefix} ╚════════════════════════════════════════════════════════════╝`);
 
   return {
     table: {

@@ -463,7 +463,15 @@ io.on('connection', (socket: Socket) => {
     try {
       const { tableId, playerId, playerName } = data;
 
-      const room = gameRooms.get(tableId);
+      let room = gameRooms.get(tableId);
+
+      // Auto-create quickplay table if it doesn't exist (ensures it's always available)
+      if (!room && tableId === 'quickplay-1') {
+        log(`[Join Room] Quickplay table not found, auto-creating...`);
+        createQuickplayTable();
+        room = gameRooms.get(tableId);
+      }
+
       if (!room) {
         throw new Error('Table not found');
       }
